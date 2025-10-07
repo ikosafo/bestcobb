@@ -144,7 +144,7 @@ if (isset($_SESSION['store_id'])) {
                 ];
 
                 // Filter navigation items for Cashier role
-                if ($user['role'] === 'Cashier') {
+                if ($user['role'] == 'cashier') {
                     $allowed_items = ['Dashboard', 'Sales', 'Log Out'];
                     $nav_items = array_filter($nav_items, function($item) use ($allowed_items) {
                         return in_array($item['name'], $allowed_items);
