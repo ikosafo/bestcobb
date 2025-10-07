@@ -420,12 +420,16 @@ require_once __DIR__ . '/includes/header.php';
                 <button onclick="openModal('add')" class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
                     <i data-feather="plus" class="w-4 h-4 mr-2"></i> Add Product
                 </button>
-                <a href="inventory.php?export=true" class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent/90 transition flex items-center">
-                    <i data-feather="download" class="w-4 h-4 mr-2"></i> Export Excel
-                </a>
-                <button onclick="openImportModal()" class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent/90 transition flex items-center">
-                    <i data-feather="upload" class="w-4 h-4 mr-2"></i> Import Excel
-                </button>
+                <p>
+                    <a href="inventory.php?export=true" class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent/90 transition flex items-center">
+                        <i data-feather="download" class="w-4 h-4 mr-2"></i> Export Excel
+                    </a>
+                    <br>
+                    <button onclick="openImportModal()" class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent/90 transition flex items-center">
+                        <i data-feather="upload" class="w-4 h-4 mr-2"></i> Import Excel
+                    </button>
+                </p>
+                
             </div>
         </div>
         <div class="overflow-x-auto">
