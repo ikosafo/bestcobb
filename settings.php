@@ -3,7 +3,7 @@ require_once __DIR__ . '/config.php';
 $page_title = 'Settings';
 
 // Check if user is logged in and has the correct role
-if (!isset($_SESSION['role']) || $_SESSION['role'] == 'Cashier') {
+if (!isset($_SESSION['role']) || $_SESSION['role'] == 'cashier') {
     header('Location: index.php'); // Redirect to Dashboard if Cashier tries to access
     exit;
 }

@@ -9,7 +9,7 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 $page_title = 'Inventory';
 
 // Check if user is logged in and has the correct role
-if (!isset($_SESSION['role']) || $_SESSION['role'] == 'Cashier') {
+if (!isset($_SESSION['role']) || $_SESSION['role'] == 'cashier') {
     header('Location: index.php'); // Redirect to Dashboard if Cashier tries to access
     exit;
 }
@@ -152,6 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['delete'])) {
 
 // Handle export to Excel
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['export'])) {
+    ob_start(); // Start output buffering
     $spreadsheet = new Spreadsheet();
     $sheet = $spreadsheet->getActiveSheet();
     $sheet->setTitle('Products');
@@ -187,7 +188,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['export'])) {
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     header('Content-Disposition: attachment;filename="products_export.xlsx"');
     header('Cache-Control: max-age=0');
+    header('Expires: 0');
+    header('Pragma: public');
 
+    ob_clean(); // Clean output buffer
     $writer = new Xlsx($spreadsheet);
     $writer->save('php://output');
     error_log("Exported products to Excel");
@@ -429,7 +433,6 @@ require_once __DIR__ . '/includes/header.php';
                         <i data-feather="upload" class="w-4 h-4 mr-2"></i> Import Excel
                     </button>
                 </p>
-                
             </div>
         </div>
         <div class="overflow-x-auto">
@@ -472,7 +475,7 @@ require_once __DIR__ . '/includes/header.php';
                                         <i data-feather="edit" class="w-5 h-5"></i>
                                     </button>
                                     <button 
-                                        onclick='confirmDelete("<?php echo htmlspecialchars($product['encrypted_id'], ENT_QUOTES, 'UTF-8'); ?>", "<?php echo htmlspecialchars($product['name'], ENT_QUOTES, 'UTF-8'); ?>")' 
+                                        onclick='if (confirm(`Are you sure you want to delete \"<?php echo htmlspecialchars($product['name'], ENT_QUOTES, 'UTF-8'); ?>\"? This action cannot be undone and may fail if the product is linked to sales.`)) { window.location.href = "inventory.php?delete=<?php echo htmlspecialchars($product['encrypted_id'], ENT_QUOTES, 'UTF-8'); ?>"; }' 
                                         class="text-red-500 hover:text-red-600" 
                                         <?php echo ($product['encrypted_id'] === false || $product['encrypted_id'] === '') ? 'disabled title="Encryption failed for this ID"' : ''; ?>
                                     >
@@ -593,25 +596,6 @@ require_once __DIR__ . '/includes/header.php';
             </form>
         </div>
     </div>
-
-    <!-- Delete Confirmation Modal -->
-    <div id="delete-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
-        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-md">
-            <h2 class="text-lg font-semibold mb-4">Confirm Delete</h2>
-            <p id="delete-message" class="text-sm text-gray-500 dark:text-gray-400 mb-4"></p>
-            <form id="delete-form" method="GET" action="inventory.php">
-                <input type="hidden" name="delete" id="delete-product-encrypted-id">
-                <div class="flex space-x-4">
-                    <button type="submit" class="bg-red-500 text-white px-6 py-2 rounded-lg hover:bg-red-600 transition flex items-center">
-                        <i data-feather="trash-2" class="w-4 h-4 mr-2"></i> Delete
-                    </button>
-                    <button type="button" onclick="closeDeleteModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
-                        <i data-feather="x" class="w-4 h-4 mr-2"></i> Cancel
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
 </main>
 
 <script>
@@ -655,28 +639,6 @@ require_once __DIR__ . '/includes/header.php';
         document.getElementById('import-modal').classList.add('hidden');
         document.getElementById('import-form').reset();
         console.log('Closed import modal');
-    }
-
-    // Delete modal handling
-    function confirmDelete(encryptedId, name) {
-        const modal = document.getElementById('delete-modal');
-        document.getElementById('delete-product-encrypted-id').value = encryptedId;
-        document.getElementById('delete-message').textContent = `Are you sure you want to delete "${name}"? This action cannot be undone and may fail if the product is linked to sales.`;
-        
-        if (!encryptedId) {
-            alert('Error: Cannot delete. The product ID could not be encrypted.');
-            return;
-        }
-
-        modal.classList.remove('hidden');
-        console.log('Opening delete modal for encrypted_id:', encryptedId, 'Name:', name);
-        feather.replace();
-    }
-
-    function closeDeleteModal() {
-        document.getElementById('delete-modal').classList.add('hidden');
-        document.getElementById('delete-product-encrypted-id').value = '';
-        console.log('Closed delete modal');
     }
 
     // Product filtering
