@@ -120,7 +120,6 @@ if (isset($_SESSION['store_id'])) {
 </head>
 <body class="bg-secondary dark:bg-gray-900 text-gray-900 dark:text-gray-100">
     <div class="flex h-screen">
-        <!-- Sidebar -->
         <div id="sidebar" class="sidebar sidebar-full gradient-bg text-white h-screen shadow-lg">
             <div class="p-4 flex justify-between items-center">
                 <h1 id="sidebar-title" class="text-lg font-semibold tracking-tight">Mall POS</h1>
@@ -163,21 +162,18 @@ if (isset($_SESSION['store_id'])) {
             </nav>
         </div>
 
-        <!-- Main Content -->
         <div class="flex-1 flex flex-col">
-            <!-- Header -->
             <header class="bg-white dark:bg-gray-800 shadow-sm p-4 flex justify-between items-center">
-                <div class="flex items-center space-x-4">
-                    <div class="relative">
-                        <input type="text" id="search-sales" placeholder="Search sales..." class="pl-10 pr-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" oninput="filterSales()">
-                        <i data-feather="search" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral"></i>
-                    </div>
-                    <select id="store-filter" class="p-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm" disabled>
-                        <option value="<?php echo isset($_SESSION['store_id']) ? $_SESSION['store_id'] : ''; ?>">
+                <div class="flex items-center space-x-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+                    <i data-feather="shopping-bag" class="w-5 h-5 text-primary dark:text-accent"></i>
+                    <div class="flex flex-col">
+                        <span class="text-xs text-neutral dark:text-gray-400 font-medium">Current Store:</span>
+                        <span class="text-sm font-semibold text-gray-900 dark:text-gray-100">
                             <?php echo htmlspecialchars($user['store']); ?>
-                        </option>
-                    </select>
+                        </span>
+                    </div>
                 </div>
+                
                 <div class="flex items-center space-x-4">
                     <button class="relative p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600">
                         <i data-feather="bell" class="w-5 h-5"></i>
@@ -193,13 +189,12 @@ if (isset($_SESSION['store_id'])) {
                             <a href="logout.php" class="block px-4 py-2 text-sm hover:bg-secondary dark:hover:bg-gray-600">Logout</a>
                         </div>
                     </div>
-                    <button onclick="toggleDarkMode()" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600">
+                    <!-- <button onclick="toggleDarkMode()" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600">
                         <i data-feather="moon" class="w-5 h-5"></i>
-                    </button>
+                    </button> -->
                 </div>
             </header>
 
-            <!-- Main Content Opening -->
             <main class="p-6 flex-1 overflow-auto">
                 <div class="flex justify-between items-center mb-6">
                     <h1 class="text-2xl font-semibold tracking-tight"><?php echo isset($page_title) ? htmlspecialchars($page_title) : 'Page'; ?></h1>
