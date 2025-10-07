@@ -142,13 +142,22 @@ if (isset($_SESSION['store_id'])) {
                     ['name' => 'Settings', 'icon' => 'settings', 'url' => 'settings.php'],
                     ['name' => 'Log Out', 'icon' => 'power', 'url' => 'logout.php'],
                 ];
+
+                // Filter navigation items for Cashier role
+                if ($user['role'] === 'Cashier') {
+                    $allowed_items = ['Dashboard', 'Sales', 'Log Out'];
+                    $nav_items = array_filter($nav_items, function($item) use ($allowed_items) {
+                        return in_array($item['name'], $allowed_items);
+                    });
+                }
+
                 $current_page = isset($page_title) ? $page_title : '';
                 foreach ($nav_items as $item) {
                     $active = $item['name'] === $current_page ? 'bg-primary/80' : '';
                     echo "<a href='{$item['url']}' class='flex items-center p-4 hover:bg-primary/80 transition rounded-lg mx-2 $active'>
                             <i data-feather='{$item['icon']}' class='w-5 h-5'></i>
                             <span id='nav-{$item['name']}' class='ml-3 text-sm font-medium'>{$item['name']}</span>
-                          </a>";
+                        </a>";
                 }
                 ?>
             </nav>

@@ -3,6 +3,12 @@
 require_once __DIR__ . '/config.php';
 $page_title = 'Reports';
 
+// Check if user is logged in and has the correct role
+if (!isset($_SESSION['role']) || $_SESSION['role'] == 'Cashier') {
+    header('Location: index.php'); // Redirect to Dashboard if Cashier tries to access
+    exit;
+}
+
 // Enable full error reporting
 error_reporting(E_ALL);
 ini_set('display_errors', 1);

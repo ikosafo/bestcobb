@@ -2,6 +2,12 @@
 require_once __DIR__ . '/config.php';
 $page_title = 'Users';
 
+// Check if user is logged in and has the correct role
+if (!isset($_SESSION['role']) || $_SESSION['role'] == 'Cashier') {
+    header('Location: index.php'); // Redirect to Dashboard if Cashier tries to access
+    exit;
+}
+
 // Initialize variables
 $success_message = '';
 $error_message = '';

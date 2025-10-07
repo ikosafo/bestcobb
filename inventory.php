@@ -1,7 +1,18 @@
 <?php
 // inventory.php
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/vendor/autoload.php'; // Include PhpSpreadsheet
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+
 $page_title = 'Inventory';
+
+// Check if user is logged in and has the correct role
+if (!isset($_SESSION['role']) || $_SESSION['role'] == 'Cashier') {
+    header('Location: index.php'); // Redirect to Dashboard if Cashier tries to access
+    exit;
+}
 
 // Enable full error reporting
 error_reporting(E_ALL);
@@ -94,7 +105,7 @@ function decryptId($encrypted) {
     return (int)$decrypted_id;
 }
 
-// Handle form submissions and GET delete
+// Handle form submissions, GET delete, and export/import
 $success_message = '';
 $error_message = '';
 
@@ -139,43 +150,190 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['delete'])) {
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_POST['action'])) {
-        if ($_POST['action'] === 'add' || $_POST['action'] === 'edit') {
-            $product_id = filter_input(INPUT_POST, 'product_id', FILTER_SANITIZE_NUMBER_INT);
-            $name = filter_input(INPUT_POST, 'name', FILTER_SANITIZE_STRING);
-            $category = filter_input(INPUT_POST, 'category', FILTER_SANITIZE_STRING);
-            $store_id = filter_input(INPUT_POST, 'store_id', FILTER_SANITIZE_NUMBER_INT);
-            $stock = filter_input(INPUT_POST, 'stock', FILTER_SANITIZE_NUMBER_INT);
-            $price = filter_input(INPUT_POST, 'price', FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION);
-            $status = filter_input(INPUT_POST, 'status', FILTER_SANITIZE_STRING);
+// Handle export to Excel
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['export'])) {
+    $spreadsheet = new Spreadsheet();
+    $sheet = $spreadsheet->getActiveSheet();
+    $sheet->setTitle('Products');
 
-            if ($name && $category && $store_id && $stock !== null && $price !== null && $status) {
-                if ($_POST['action'] === 'add') {
-                    $query = "INSERT INTO products (name, category, store_id, stock, price, status) VALUES (?, ?, ?, ?, ?, ?)";
-                    $stmt = mysqli_prepare($conn, $query);
-                    mysqli_stmt_bind_param($stmt, 'ssisds', $name, $category, $store_id, $stock, $price, $status);
+    // Set headers
+    $headers = ['ID', 'Product Name', 'Category', 'Store Name', 'Stock', 'Price', 'Status'];
+    $sheet->fromArray($headers, null, 'A1');
+
+    // Fetch products for export
+    $products_query = "SELECT p.id, p.name, p.category, s.store_name, p.stock, p.price, p.status 
+                       FROM products p LEFT JOIN stores s ON p.store_id = s.id ORDER BY p.id DESC";
+    $products_result = mysqli_query($conn, $products_query);
+    $row_number = 2;
+    while ($row = mysqli_fetch_assoc($products_result)) {
+        $sheet->fromArray([
+            $row['id'],
+            $row['name'],
+            $row['category'],
+            $row['store_name'] ?? 'N/A',
+            $row['stock'],
+            $row['price'],
+            $row['status']
+        ], null, "A$row_number");
+        $row_number++;
+    }
+
+    // Auto-size columns
+    foreach (range('A', 'G') as $column) {
+        $sheet->getColumnDimension($column)->setAutoSize(true);
+    }
+
+    // Set headers for download
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment;filename="products_export.xlsx"');
+    header('Cache-Control: max-age=0');
+
+    $writer = new Xlsx($spreadsheet);
+    $writer->save('php://output');
+    error_log("Exported products to Excel");
+    exit;
+}
+
+// Handle import from Excel
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'import' && isset($_FILES['import_file'])) {
+    $file = $_FILES['import_file'];
+    if ($file['error'] === UPLOAD_ERR_OK && $file['size'] > 0) {
+        $allowed_types = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'];
+        if (in_array($file['type'], $allowed_types)) {
+            try {
+                $spreadsheet = IOFactory::load($file['tmp_name']);
+                $sheet = $spreadsheet->getActiveSheet();
+                $data = $sheet->toArray();
+                $headers = array_shift($data); // Remove header row
+
+                // Expected headers
+                $expected_headers = ['ID', 'Product Name', 'Category', 'Store Name', 'Stock', 'Price', 'Status'];
+                if ($headers !== $expected_headers) {
+                    $error_message = "Invalid Excel file format. Expected headers: " . implode(', ', $expected_headers);
+                    error_log("Invalid Excel headers: " . implode(', ', $headers));
                 } else {
-                    $query = "UPDATE products SET name = ?, category = ?, store_id = ?, stock = ?, price = ?, status = ? WHERE id = ?";
-                    $stmt = mysqli_prepare($conn, $query);
-                    mysqli_stmt_bind_param($stmt, 'ssisdsi', $name, $category, $store_id, $stock, $price, $status, $product_id);
+                    $success_count = 0;
+                    $error_count = 0;
+                    foreach ($data as $row) {
+                        $id = filter_var($row[0], FILTER_VALIDATE_INT) ?: null;
+                        $name = filter_var($row[1], FILTER_SANITIZE_STRING) ?: '';
+                        $category = filter_var($row[2], FILTER_SANITIZE_STRING) ?: '';
+                        $store_name = filter_var($row[3], FILTER_SANITIZE_STRING) ?: '';
+                        $stock = filter_var($row[4], FILTER_VALIDATE_INT) ?: null;
+                        $price = filter_var($row[5], FILTER_VALIDATE_FLOAT) ?: null;
+                        $status = filter_var($row[6], FILTER_SANITIZE_STRING) ?: '';
+
+                        // Validate required fields
+                        if (!$name || !$category || !$store_name || $stock === null || $price === null || !$status) {
+                            error_log("Skipping row due to missing fields: " . json_encode($row));
+                            $error_count++;
+                            continue;
+                        }
+
+                        // Validate status
+                        if (!in_array($status, ['In Stock', 'Low Stock', 'Out of Stock'])) {
+                            error_log("Invalid status '$status' in row: " . json_encode($row));
+                            $error_count++;
+                            continue;
+                        }
+
+                        // Get store_id from store_name
+                        $store_query = "SELECT id FROM stores WHERE store_name = ? AND status = 'Active'";
+                        $stmt = mysqli_prepare($conn, $store_query);
+                        mysqli_stmt_bind_param($stmt, 's', $store_name);
+                        mysqli_stmt_execute($stmt);
+                        $store_result = mysqli_stmt_get_result($stmt);
+                        if ($store_row = mysqli_fetch_assoc($store_result)) {
+                            $store_id = $store_row['id'];
+                        } else {
+                            error_log("Invalid store name '$store_name' in row: " . json_encode($row));
+                            $error_count++;
+                            continue;
+                        }
+                        mysqli_stmt_close($stmt);
+
+                        // Insert or update product
+                        if ($id) {
+                            // Check if product exists
+                            $check_query = "SELECT id FROM products WHERE id = ?";
+                            $check_stmt = mysqli_prepare($conn, $check_query);
+                            mysqli_stmt_bind_param($check_stmt, 'i', $id);
+                            mysqli_stmt_execute($check_stmt);
+                            $check_result = mysqli_stmt_get_result($check_stmt);
+                            if (mysqli_num_rows($check_result) > 0) {
+                                // Update existing product
+                                $query = "UPDATE products SET name = ?, category = ?, store_id = ?, stock = ?, price = ?, status = ? WHERE id = ?";
+                                $stmt = mysqli_prepare($conn, $query);
+                                mysqli_stmt_bind_param($stmt, 'ssisdsi', $name, $category, $store_id, $stock, $price, $status, $id);
+                            } else {
+                                // Insert new product with specified ID
+                                $query = "INSERT INTO products (id, name, category, store_id, stock, price, status) VALUES (?, ?, ?, ?, ?, ?, ?)";
+                                $stmt = mysqli_prepare($conn, $query);
+                                mysqli_stmt_bind_param($stmt, 'issisds', $id, $name, $category, $store_id, $stock, $price, $status);
+                            }
+                            mysqli_stmt_close($check_stmt);
+                        } else {
+                            // Insert new product without ID
+                            $query = "INSERT INTO products (name, category, store_id, stock, price, status) VALUES (?, ?, ?, ?, ?, ?)";
+                            $stmt = mysqli_prepare($conn, $query);
+                            mysqli_stmt_bind_param($stmt, 'ssisds', $name, $category, $store_id, $stock, $price, $status);
+                        }
+
+                        if (mysqli_stmt_execute($stmt)) {
+                            $success_count++;
+                        } else {
+                            error_log("Error importing product: " . mysqli_error($conn) . " - Row: " . json_encode($row));
+                            $error_count++;
+                        }
+                        mysqli_stmt_close($stmt);
+                    }
+                    $success_message = "Imported $success_count products successfully. $error_count errors occurred.";
+                    error_log("Import completed: $success_count successes, $error_count errors");
                 }
-                if (mysqli_stmt_execute($stmt)) {
-                    $success_message = $_POST['action'] === 'add' ? 'Product added successfully!' : 'Product updated successfully!';
-                    error_log($_POST['action'] === 'add' ? "Product added: $name" : "Product updated: ID $product_id");
-                } else {
-                    $error_message = 'Error saving product: ' . mysqli_error($conn);
-                    error_log("Error saving product: " . mysqli_error($conn));
-                }
-                mysqli_stmt_close($stmt);
-            } else {
-                $error_message = 'Please fill in all required fields.';
-                error_log("Missing required fields in product form: " . print_r($_POST, true));
+            } catch (Exception $e) {
+                $error_message = "Error processing Excel file: " . $e->getMessage();
+                error_log("Import error: " . $e->getMessage());
             }
+        } else {
+            $error_message = "Invalid file type. Please upload an Excel file (.xlsx or .xls).";
+            error_log("Invalid file type uploaded: " . $file['type']);
         }
     } else {
-        $error_message = 'Invalid form action.';
-        error_log('No action specified in POST request: ' . print_r($_POST, true));
+        $error_message = "Error uploading file: " . ($file['error'] === UPLOAD_ERR_NO_FILE ? "No file uploaded" : $file['error']);
+        error_log("File upload error: " . $file['error']);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array($_POST['action'], ['add', 'edit'])) {
+    $product_id = filter_input(INPUT_POST, 'product_id', FILTER_SANITIZE_NUMBER_INT);
+    $name = filter_input(INPUT_POST, 'name', FILTER_SANITIZE_STRING);
+    $category = filter_input(INPUT_POST, 'category', FILTER_SANITIZE_STRING);
+    $store_id = filter_input(INPUT_POST, 'store_id', FILTER_SANITIZE_NUMBER_INT);
+    $stock = filter_input(INPUT_POST, 'stock', FILTER_SANITIZE_NUMBER_INT);
+    $price = filter_input(INPUT_POST, 'price', FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION);
+    $status = filter_input(INPUT_POST, 'status', FILTER_SANITIZE_STRING);
+
+    if ($name && $category && $store_id && $stock !== null && $price !== null && $status) {
+        if ($_POST['action'] === 'add') {
+            $query = "INSERT INTO products (name, category, store_id, stock, price, status) VALUES (?, ?, ?, ?, ?, ?)";
+            $stmt = mysqli_prepare($conn, $query);
+            mysqli_stmt_bind_param($stmt, 'ssisds', $name, $category, $store_id, $stock, $price, $status);
+        } else {
+            $query = "UPDATE products SET name = ?, category = ?, store_id = ?, stock = ?, price = ?, status = ? WHERE id = ?";
+            $stmt = mysqli_prepare($conn, $query);
+            mysqli_stmt_bind_param($stmt, 'ssisdsi', $name, $category, $store_id, $stock, $price, $status, $product_id);
+        }
+        if (mysqli_stmt_execute($stmt)) {
+            $success_message = $_POST['action'] === 'add' ? 'Product added successfully!' : 'Product updated successfully!';
+            error_log($_POST['action'] === 'add' ? "Product added: $name" : "Product updated: ID $product_id");
+        } else {
+            $error_message = 'Error saving product: ' . mysqli_error($conn);
+            error_log("Error saving product: " . mysqli_error($conn));
+        }
+        mysqli_stmt_close($stmt);
+    } else {
+        $error_message = 'Please fill in all required fields.';
+        error_log("Missing required fields in product form: " . print_r($_POST, true));
     }
 }
 
@@ -261,6 +419,12 @@ require_once __DIR__ . '/includes/header.php';
                 </select>
                 <button onclick="openModal('add')" class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
                     <i data-feather="plus" class="w-4 h-4 mr-2"></i> Add Product
+                </button>
+                <a href="inventory.php?export=true" class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent/90 transition flex items-center">
+                    <i data-feather="download" class="w-4 h-4 mr-2"></i> Export Excel
+                </a>
+                <button onclick="openImportModal()" class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent/90 transition flex items-center">
+                    <i data-feather="upload" class="w-4 h-4 mr-2"></i> Import Excel
                 </button>
             </div>
         </div>
@@ -401,6 +565,31 @@ require_once __DIR__ . '/includes/header.php';
         </div>
     </div>
 
+    <!-- Import Excel Modal -->
+    <div id="import-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-md">
+            <h2 class="text-lg font-semibold mb-4">Import Products from Excel</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                Upload an Excel file with columns: ID (optional), Product Name, Category, Store Name, Stock, Price, Status (In Stock, Low Stock, or Out of Stock).
+            </p>
+            <form id="import-form" method="POST" action="inventory.php" enctype="multipart/form-data" class="space-y-4">
+                <input type="hidden" name="action" value="import">
+                <div>
+                    <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Excel File <span class="text-red-500">*</span></label>
+                    <input type="file" name="import_file" accept=".xlsx,.xls" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none" required>
+                </div>
+                <div class="flex space-x-4">
+                    <button type="submit" class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
+                        <i data-feather="upload" class="w-4 h-4 mr-2"></i> Import
+                    </button>
+                    <button type="button" onclick="closeImportModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
+                        <i data-feather="x" class="w-4 h-4 mr-2"></i> Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Delete Confirmation Modal -->
     <div id="delete-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
         <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-md">
@@ -425,7 +614,7 @@ require_once __DIR__ . '/includes/header.php';
     // Initialize Feather Icons
     feather.replace();
 
-    // Modal handling
+    // Modal handling for Add/Edit
     function openModal(action, product = {}) {
         const modal = document.getElementById('product-modal');
         const title = document.getElementById('modal-title');
@@ -451,6 +640,20 @@ require_once __DIR__ . '/includes/header.php';
         console.log('Closed product modal');
     }
 
+    // Modal handling for Import
+    function openImportModal() {
+        document.getElementById('import-modal').classList.remove('hidden');
+        console.log('Opened import modal');
+        feather.replace();
+    }
+
+    function closeImportModal() {
+        document.getElementById('import-modal').classList.add('hidden');
+        document.getElementById('import-form').reset();
+        console.log('Closed import modal');
+    }
+
+    // Delete modal handling
     function confirmDelete(encryptedId, name) {
         const modal = document.getElementById('delete-modal');
         document.getElementById('delete-product-encrypted-id').value = encryptedId;
