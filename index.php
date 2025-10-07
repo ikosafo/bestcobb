@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/config.php';
 
-$page_title = 'Mall POS Dashboard';
+$page_title = 'Dashboard';
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {

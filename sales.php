@@ -1,51 +1,123 @@
 <?php
+// sales.php
 require_once __DIR__ . '/config.php';
+
 $page_title = 'Sales';
 
-// Handle non-AJAX form submissions (delete only)
+// Check if user is logged in
+if (!isset($_SESSION['user_id'])) {
+    header('Location: login.php');
+    exit;
+}
+
+// Initialize user array
+$user = [
+    'name' => $_SESSION['username'] ?? 'John Doe',
+    'role' => $_SESSION['role'] ?? 'Mall Admin',
+    'store' => 'Unknown Store'
+];
+
+// Fetch store name
+if (isset($_SESSION['store_id'])) {
+    $store_query = "SELECT store_name FROM stores WHERE id = ? AND status = 'Active'";
+    $stmt = mysqli_prepare($conn, $store_query);
+    if ($stmt) {
+        mysqli_stmt_bind_param($stmt, 'i', $_SESSION['store_id']);
+        mysqli_stmt_execute($stmt);
+        $store_result = mysqli_stmt_get_result($stmt);
+        if ($store_row = mysqli_fetch_assoc($store_result)) {
+            $user['store'] = $store_row['store_name'];
+        } else {
+            error_log("No active store found for store_id: {$_SESSION['store_id']}");
+        }
+        mysqli_stmt_close($stmt);
+    } else {
+        error_log("Error preparing store query: " . mysqli_error($conn));
+    }
+}
+
+// Load settings
+$settings_query = "SELECT * FROM settings WHERE id = 1";
+$settings_result = mysqli_query($conn, $settings_query);
+$settings = mysqli_fetch_assoc($settings_result) ?: [
+    'currency_symbol' => 'GHS',
+    'store_name' => 'Mall Supermarket POS',
+    'address' => '123 Market St, Cityville',
+    'contact' => '(123) 456-7890',
+    'receipt_header' => 'Mall Supermarket POS',
+    'receipt_footer' => 'Thank you for shopping at our mall!',
+    'receipt_width' => 80,
+    'auto_print' => 0,
+    'payment_summary_alignment' => 'center'
+];
+
+// Calculate cart total safely
+$cart_total = 0;
+foreach ($_SESSION['cart'] ?? [] as $item) {
+    $cart_total += floatval($item['subtotal'] ?? 0);
+}
+
+// Handle non-AJAX form submissions
 $success_message = '';
 $error_message = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($_POST['action'] === 'remove_from_cart') {
-        $index = filter_input(INPUT_POST, 'index', FILTER_SANITIZE_NUMBER_INT);
-        if (isset($_SESSION['cart'][$index])) {
+        $index = filter_input(INPUT_POST, 'index', FILTER_VALIDATE_INT);
+        if ($index !== false && isset($_SESSION['cart'][$index])) {
             unset($_SESSION['cart'][$index]);
             $_SESSION['cart'] = array_values($_SESSION['cart']);
             $success_message = 'Item removed from cart!';
+        } else {
+            $error_message = 'Invalid cart item.';
         }
     } elseif ($_POST['action'] === 'delete') {
-        $transaction_id = filter_input(INPUT_POST, 'transaction_id', FILTER_SANITIZE_NUMBER_INT);
-        $query = "DELETE FROM transactions WHERE id = ?";
-        $stmt = mysqli_prepare($conn, $query);
-        mysqli_stmt_bind_param($stmt, 'i', $transaction_id);
-        if (mysqli_stmt_execute($stmt)) {
-            $success_message = 'Sale deleted successfully!';
+        $transaction_id = filter_input(INPUT_POST, 'transaction_id', FILTER_VALIDATE_INT);
+        if ($transaction_id) {
+            $query = "DELETE FROM transactions WHERE id = ?";
+            $stmt = mysqli_prepare($conn, $query);
+            mysqli_stmt_bind_param($stmt, 'i', $transaction_id);
+            if (mysqli_stmt_execute($stmt)) {
+                $success_message = 'Sale deleted successfully!';
+            } else {
+                $error_message = 'Error deleting sale: ' . mysqli_error($conn);
+            }
+            mysqli_stmt_close($stmt);
         } else {
-            $error_message = 'Error deleting sale: ' . mysqli_error($conn);
+            $error_message = 'Invalid transaction ID.';
         }
-        mysqli_stmt_close($stmt);
     }
 }
 
-// Fetch products for search
+// Fetch products
 $products_query = "SELECT id, name, price, stock, store_id, barcode FROM products WHERE status != 'Out of Stock'";
+if (isset($_SESSION['store_id'])) {
+    $products_query .= " AND store_id = {$_SESSION['store_id']}";
+}
 $products_result = mysqli_query($conn, $products_query);
 $products = $products_result ? mysqli_fetch_all($products_result, MYSQLI_ASSOC) : [];
 
 // Fetch metrics
-$total_sales_query = "SELECT SUM(amount) as total FROM transactions WHERE DATE(date) = CURDATE()";
+$total_sales_query = "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE DATE(date) = CURDATE()";
+if (isset($_SESSION['store_id'])) {
+    $total_sales_query .= " AND store_id = {$_SESSION['store_id']}";
+}
 $total_sales_result = mysqli_query($conn, $total_sales_query);
 $total_sales = $total_sales_result ? mysqli_fetch_assoc($total_sales_result)['total'] ?? 0 : 0;
 
-$transactions_today_query = "SELECT COUNT(*) as count FROM transactions WHERE DATE(date) = CURDATE()";
+$transactions_today_query = "SELECT COALESCE(COUNT(*), 0) as count FROM transactions WHERE DATE(date) = CURDATE()";
+if (isset($_SESSION['store_id'])) {
+    $transactions_today_query .= " AND store_id = {$_SESSION['store_id']}";
+}
 $transactions_today_result = mysqli_query($conn, $transactions_today_query);
 $transactions_today = $transactions_today_result ? mysqli_fetch_assoc($transactions_today_result)['count'] : 0;
 
-$pending_transactions_query = "SELECT COUNT(*) as count FROM transactions WHERE status = 'Pending'";
+$pending_transactions_query = "SELECT COALESCE(COUNT(*), 0) as count FROM transactions WHERE status = 'Pending'";
+if (isset($_SESSION['store_id'])) {
+    $pending_transactions_query .= " AND store_id = {$_SESSION['store_id']}";
+}
 $pending_transactions_result = mysqli_query($conn, $pending_transactions_query);
 $pending_transactions = $pending_transactions_result ? mysqli_fetch_assoc($pending_transactions_result)['count'] : 0;
 
-// Include header
 require_once __DIR__ . '/includes/header.php';
 ?>
 
@@ -67,11 +139,10 @@ require_once __DIR__ . '/includes/header.php';
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="cart-form">
         <div>
             <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Store <span class="text-red-500">*</span></label>
-            <select name="store_id" id="cart-store-id" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none" required onchange="updateProductOptions()">
-                <option value="">Select Store</option>
-                <?php foreach ($stores as $store): ?>
-                    <option value="<?php echo $store['id']; ?>"><?php echo htmlspecialchars($store['store_name']); ?></option>
-                <?php endforeach; ?>
+            <select name="store_id" id="cart-store-id" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed" disabled required>
+                <option value="<?php echo isset($_SESSION['store_id']) ? $_SESSION['store_id'] : ''; ?>">
+                    <?php echo htmlspecialchars($user['store']); ?>
+                </option>
             </select>
         </div>
         <div class="relative">
@@ -113,14 +184,14 @@ require_once __DIR__ . '/includes/header.php';
                 </tr>
             </thead>
             <tbody id="cart-table">
-                <?php foreach ($_SESSION['cart'] as $index => $item): ?>
+                <?php foreach ($_SESSION['cart'] ?? [] as $index => $item): ?>
                     <tr class="border-b border-gray-200 dark:border-gray-700">
                         <td class="p-3"><?php echo htmlspecialchars($item['name']); ?></td>
-                        <td class="p-3"><?php echo htmlspecialchars($stores[array_search($item['store_id'], array_column($stores, 'id'))]['store_name'] ?? 'Unknown'); ?></td>
+                        <td class="p-3"><?php echo htmlspecialchars($user['store']); ?></td>
                         <td class="p-3"><?php echo htmlspecialchars($item['quantity']); ?></td>
                         <td class="p-3"><?php echo htmlspecialchars($item['stock'] - $item['quantity']); ?></td>
-                        <td class="p-3">$<?php echo number_format($item['price'] ?? 0, 2); ?></td>
-                        <td class="p-3">$<?php echo number_format($item['subtotal'] ?? 0, 2); ?></td>
+                        <td class="p-3"><?php echo htmlspecialchars($settings['currency_symbol']) . number_format($item['price'] ?? 0, 2); ?></td>
+                        <td class="p-3"><?php echo htmlspecialchars($settings['currency_symbol']) . number_format($item['subtotal'] ?? 0, 2); ?></td>
                         <td class="p-3">
                             <form method="POST" action="sales.php">
                                 <input type="hidden" name="action" value="remove_from_cart">
@@ -136,7 +207,7 @@ require_once __DIR__ . '/includes/header.php';
         </table>
     </div>
     <div class="mt-4">
-        <p class="text-lg font-semibold">Total: $<span id="cart-total"><?php echo number_format(array_sum(array_column($_SESSION['cart'], 'subtotal')) ?? 0, 2); ?></span></p>
+        <p class="text-lg font-semibold">Total: <?php echo htmlspecialchars($settings['currency_symbol']); ?><span id="cart-total"><?php echo number_format($cart_total, 2); ?></span></p>
     </div>
     <?php if (!empty($_SESSION['cart'])): ?>
         <div class="mt-4">
@@ -197,7 +268,7 @@ require_once __DIR__ . '/includes/header.php';
             <i data-feather="dollar-sign" class="w-8 h-8 text-accent mr-4"></i>
             <div>
                 <h2 class="text-sm font-medium text-gray-500 dark:text-gray-400">Total Sales Today</h2>
-                <p class="text-xl font-semibold text-primary">$<?php echo number_format($total_sales ?? 0, 2); ?></p>
+                <p class="text-xl font-semibold text-primary"><?php echo htmlspecialchars($settings['currency_symbol']) . number_format($total_sales ?? 0, 2); ?></p>
             </div>
         </div>
     </div>
@@ -226,6 +297,7 @@ require_once __DIR__ . '/includes/header.php';
     <div class="bg-white dark:bg-gray-800 p-6 rounded-lg max-w-lg w-full overflow-hidden">
         <h2 class="text-lg font-semibold mb-4">Checkout</h2>
         <div id="checkout-form">
+            <div id="checkout-message" class="hidden mb-4"></div>
             <div class="mb-4">
                 <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Customer Name <span class="text-red-500">*</span></label>
                 <input type="text" id="customer-name" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none" required>
@@ -233,8 +305,7 @@ require_once __DIR__ . '/includes/header.php';
             <div class="mb-4">
                 <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Payment Method <span class="text-red-500">*</span></label>
                 <select id="payment-method" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none" required>
-                    <option value="">Select Payment Method</option>
-                    <option value="Cash">Cash</option>
+                    <option value="Cash" selected>Cash</option>
                     <option value="Credit Card">Credit Card</option>
                     <option value="Mobile Payment">Mobile Payment</option>
                 </select>
@@ -245,7 +316,7 @@ require_once __DIR__ . '/includes/header.php';
             </div>
             <div class="mb-4">
                 <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Total</label>
-                <input type="text" id="checkout-total" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400" value="$<?php echo number_format(array_sum(array_column($_SESSION['cart'], 'subtotal')) ?? 0, 2); ?>" readonly>
+                <input type="text" id="checkout-total" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400" value="<?php echo htmlspecialchars($settings['currency_symbol']) . number_format($cart_total, 2); ?>" readonly>
             </div>
             <div class="flex justify-end space-x-2">
                 <button onclick="closeCheckoutModal()" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition">Cancel</button>
@@ -272,15 +343,25 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <script>
-// Product search and filtering
+// Load tax rates
+const taxRates = <?php
+    $tax_query = "SELECT name, rate FROM tax_rates";
+    $tax_result = mysqli_query($conn, $tax_query);
+    $taxes = mysqli_fetch_all($tax_result, MYSQLI_ASSOC);
+    echo json_encode($taxes);
+?>;
+
+// Load settings
+const settings = <?php echo json_encode($settings); ?>;
+
+// Product search
 let products = <?php echo json_encode($products); ?>;
+let currencySymbol = '<?php echo htmlspecialchars($settings['currency_symbol']); ?>';
 function filterProducts() {
     const search = document.getElementById('product-search').value.toLowerCase();
-    const storeId = document.getElementById('cart-store-id').value;
     const results = document.getElementById('product-search-results');
     results.innerHTML = '';
     const filteredProducts = products.filter(product => 
-        (!storeId || product.store_id == storeId) && 
         (product.name.toLowerCase().includes(search) || product.barcode?.toLowerCase().includes(search))
     );
     if (filteredProducts.length > 0 && search) {
@@ -307,31 +388,22 @@ function selectProduct(id, name, stock) {
     document.getElementById('product-search-results').classList.add('hidden');
 }
 
-// Update product options based on store selection
-function updateProductOptions() {
-    const storeId = document.getElementById('cart-store-id').value;
-    document.getElementById('product-search').value = '';
-    document.getElementById('cart-product-id').value = '';
-    document.getElementById('cart-quantity').value = '';
-    document.getElementById('product-search-results').classList.add('hidden');
-}
-
-// AJAX cart addition
+// Add to cart
 async function addToCart() {
     const storeId = document.getElementById('cart-store-id').value;
     const productId = document.getElementById('cart-product-id').value;
     const quantity = document.getElementById('cart-quantity').value;
     const barcode = document.getElementById('barcode').value;
 
-    if (!storeId || (!productId && !barcode) || !quantity) {
-        showMessage('Please fill in all required fields.', false);
+    if (!storeId || (!productId && !barcode) || !quantity || quantity <= 0) {
+        showMessage('Please fill in all required fields with valid data.', false);
         return;
     }
 
     const button = document.querySelector('#cart-form button');
     button.disabled = true;
     button.innerHTML = '<i data-feather="loader" class="w-4 h-4 mr-2 animate-spin"></i> Adding...';
-    feather.replace();
+    safeFeatherReplace();
 
     try {
         const response = await fetch('add_to_cart.php', {
@@ -339,6 +411,11 @@ async function addToCart() {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: `product_id=${productId}&quantity=${quantity}&store_id=${storeId}&barcode=${encodeURIComponent(barcode)}`
         });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+
         const data = await response.json();
 
         if (data.success) {
@@ -353,35 +430,40 @@ async function addToCart() {
             document.getElementById('barcode').value = '';
             document.getElementById('product-search-results').classList.add('hidden');
         } else {
-            showMessage(data.message, false);
+            showMessage(data.message || 'Failed to add to cart.', false);
         }
     } catch (error) {
+        console.error('Add to cart error:', error);
         showMessage('Error adding to cart: ' + error.message, false);
     } finally {
         button.disabled = false;
         button.innerHTML = '<i data-feather="plus" class="w-4 h-4 mr-2"></i> Add to Cart';
-        feather.replace();
+        safeFeatherReplace();
     }
 }
 
-// Update cart table dynamically
+// Update cart table
 function updateCartTable(cart, total) {
     const cartTable = document.getElementById('cart-table');
     const cartTotal = document.getElementById('cart-total');
     const checkoutButton = document.querySelector('button[onclick="openCheckoutModal()"]');
-    const stores = <?php echo json_encode($stores); ?>;
+    const storeName = '<?php echo htmlspecialchars($user['store']); ?>';
 
     cartTable.innerHTML = '';
+    let calculatedTotal = 0;
+
     cart.forEach((item, index) => {
-        const storeName = stores.find(store => store.id == item.store_id)?.store_name || 'Unknown';
+        const itemSubtotal = Number(item.subtotal) || 0;
+        calculatedTotal += itemSubtotal;
+
         const row = `
             <tr class="border-b border-gray-200 dark:border-gray-700">
                 <td class="p-3">${item.name}</td>
                 <td class="p-3">${storeName}</td>
                 <td class="p-3">${item.quantity}</td>
                 <td class="p-3">${item.stock - item.quantity}</td>
-                <td class="p-3">$${Number(item.price).toFixed(2)}</td>
-                <td class="p-3">$${Number(item.subtotal).toFixed(2)}</td>
+                <td class="p-3">${currencySymbol}${Number(item.price || 0).toFixed(2)}</td>
+                <td class="p-3">${currencySymbol}${itemSubtotal.toFixed(2)}</td>
                 <td class="p-3">
                     <form method="POST" action="sales.php">
                         <input type="hidden" name="action" value="remove_from_cart">
@@ -395,7 +477,10 @@ function updateCartTable(cart, total) {
         cartTable.innerHTML += row;
     });
 
-    cartTotal.textContent = total;
+    const displayTotal = isNaN(Number(total)) ? calculatedTotal : Number(total);
+    cartTotal.textContent = displayTotal.toFixed(2);
+    document.getElementById('checkout-total').value = `${currencySymbol}${displayTotal.toFixed(2)}`;
+
     if (cart.length > 0) {
         if (!checkoutButton) {
             const checkoutDiv = document.createElement('div');
@@ -409,108 +494,313 @@ function updateCartTable(cart, total) {
     } else if (checkoutButton) {
         checkoutButton.parentElement.remove();
     }
-    feather.replace();
+    safeFeatherReplace();
 }
 
-// Show success/error messages
+// Show messages
 function showMessage(message, isSuccess) {
     const messageDiv = document.createElement('div');
     messageDiv.id = isSuccess ? 'success-message' : 'error-message';
-    messageDiv.className = `mb-6 p-4 ${isSuccess ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'} rounded-lg flex items-center`;
+    messageDiv.className = `p-4 ${isSuccess ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'} rounded-lg flex items-center`;
     messageDiv.innerHTML = `<i data-feather="${isSuccess ? 'check-circle' : 'alert-circle'}" class="w-5 h-5 mr-2"></i> ${message}`;
-    
-    const existingMessage = document.getElementById('success-message') || document.getElementById('error-message');
+
+    const checkoutModal = document.getElementById('checkout-modal');
+    const isModalOpen = !checkoutModal.classList.contains('hidden');
+    const targetContainer = isModalOpen ? document.getElementById('checkout-message') : document.querySelector('main');
+
+    // Clear existing messages
+    const existingMessage = targetContainer.querySelector('#success-message, #error-message');
     if (existingMessage) existingMessage.remove();
-    
-    document.querySelector('main').insertBefore(messageDiv, document.querySelector('.card'));
+
+    // Show message in modal or main page
+    if (isModalOpen) {
+        targetContainer.classList.remove('hidden');
+        targetContainer.appendChild(messageDiv);
+    } else {
+        targetContainer.insertBefore(messageDiv, document.querySelector('.card'));
+    }
+
     setTimeout(() => messageDiv.remove(), 3000);
-    feather.replace();
+    safeFeatherReplace();
 }
 
-// Barcode input handling
+// Barcode input
 document.getElementById('barcode').addEventListener('change', async function() {
     const barcode = this.value;
     if (barcode) {
-        document.getElementById('cart-quantity').value = 1; // Default quantity for barcode scan
+        document.getElementById('cart-quantity').value = 1;
         await addToCart();
     }
 });
 
-// Checkout modal handling
+// Checkout modal
 function openCheckoutModal() {
     document.getElementById('checkout-modal').classList.remove('hidden');
 }
 
 function closeCheckoutModal() {
     document.getElementById('checkout-modal').classList.add('hidden');
+    const checkoutMessage = document.getElementById('checkout-message');
+    checkoutMessage.innerHTML = '';
+    checkoutMessage.classList.add('hidden');
 }
 
-// AJAX checkout
+// Process checkout
 async function processCheckout() {
     const customerName = document.getElementById('customer-name').value;
     const paymentMethod = document.getElementById('payment-method').value;
     const date = document.getElementById('checkout-date').value;
 
-    if (!customerName || !paymentMethod || !date) {
-        showMessage('Please fill in all required fields.', false);
+    // Debugging: Log input values
+    console.log('Checkout Inputs:', {
+        customerName,
+        customerNameTrimmed: customerName.trim(),
+        paymentMethod,
+        date,
+        cart: <?php echo json_encode($_SESSION['cart'] ?? []); ?>
+    });
+
+    // Validate inputs
+    if (!customerName.trim()) {
+        showMessage('Customer name is required and cannot be empty.', false);
         return;
+    }
+    if (!paymentMethod) {
+        showMessage('Please select a payment method.', false);
+        return;
+    }
+    if (!date) {
+        showMessage('Please select a valid date.', false);
+        return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        showMessage('Date must be in YYYY-MM-DD format.', false);
+        return;
+    }
+
+    const cart = <?php echo json_encode($_SESSION['cart'] ?? []); ?>;
+    if (!cart.length) {
+        showMessage('Cart is empty. Add items before checking out.', false);
+        return;
+    }
+
+    // Validate cart totals
+    let total = 0;
+    for (const item of cart) {
+        const subtotal = Number(item.subtotal) || 0;
+        if (isNaN(subtotal)) {
+            showMessage('Invalid cart data. Please clear cart and try again.', false);
+            return;
+        }
+        total += subtotal;
     }
 
     const button = document.querySelector('#checkout-form button[onclick="processCheckout()"]');
     button.disabled = true;
     button.innerHTML = '<i data-feather="loader" class="w-4 h-4 mr-2 animate-spin"></i> Processing...';
-    feather.replace();
+    safeFeatherReplace();
 
     try {
         const response = await fetch('checkout.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `action=checkout&customer_name=${encodeURIComponent(customerName)}&payment_method=${encodeURIComponent(paymentMethod)}&date=${encodeURIComponent(date)}`
+            body: `action=checkout&customer_name=${encodeURIComponent(customerName.trim())}&payment_method=${encodeURIComponent(paymentMethod)}&date=${encodeURIComponent(date)}`
         });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+
         const data = await response.json();
 
         if (data.success) {
             updateCartTable([], '0.00');
-            products = data.updated_products; // Update product stock
+            products = data.updated_products || products;
             showMessage(data.message, true);
             closeCheckoutModal();
             printReceiptAfterCheckout(data.transactions);
-            fetchSales(1); // Refresh sales table
+            fetchSales(1);
         } else {
-            showMessage(data.message, false);
+            showMessage(data.message || 'Checkout failed. Please try again.', false);
         }
     } catch (error) {
+        console.error('Checkout error:', error);
         showMessage('Error processing checkout: ' + error.message, false);
     } finally {
         button.disabled = false;
         button.innerHTML = '<i data-feather="check" class="w-4 h-4 mr-2"></i> Complete Checkout';
-        feather.replace();
+        safeFeatherReplace();
     }
 }
 
-// Receipt modal handling
-function openReceiptModal() {
-    document.getElementById('receipt-modal').classList.remove('hidden');
+// Calculate taxes
+function calculateTaxes(price, quantity) {
+    let totalTax = 0;
+    const taxDetails = [];
+    taxRates.forEach(tax => {
+        const taxAmount = (price * quantity * tax.rate) / 100;
+        totalTax += taxAmount;
+        taxDetails.push({
+            name: tax.name,
+            rate: tax.rate,
+            amount: taxAmount
+        });
+    });
+    return { totalTax, taxDetails };
 }
 
-function closeReceiptModal() {
-    document.getElementById('receipt-modal').classList.add('hidden');
-}
-
+// Receipt handling
 function printReceipt(sale) {
     const receiptBody = document.getElementById('receipt-body');
-    receiptBody.innerHTML = `
-        <p><strong>Transaction ID:</strong> ${sale.id}</p>
-        <p><strong>Store:</strong> ${sale.store_name}</p>
-        <p><strong>Product:</strong> ${sale.product_name}</p>
-        <p><strong>Customer:</strong> ${sale.customer_name}</p>
-        <p><strong>Quantity:</strong> ${sale.quantity}</p>
-        <p><strong>Amount:</strong> $${Number(sale.amount).toFixed(2)}</p>
-        <p><strong>Date:</strong> ${sale.date}</p>
-        <p><strong>Payment Method:</strong> ${sale.payment_method || 'N/A'}</p>
-        <p><strong>Status:</strong> ${sale.status}</p>
+    const { totalTax, taxDetails } = calculateTaxes(sale.amount / sale.quantity, sale.quantity);
+    const subtotal = Number(sale.amount) - totalTax;
+    const totalAmount = Number(sale.amount);
+
+    const receiptHTML = `
+        <div style="text-align: ${settings.payment_summary_alignment}; width: ${settings.receipt_width}mm; font-family: 'Poppins', sans-serif;">
+            <h2>${settings.receipt_header}</h2>
+            <p><strong>${settings.store_name}</strong></p>
+            <p>${settings.address}</p>
+            <p>${settings.contact}</p>
+            <hr style="margin: 10px 0;">
+            <p><strong>Transaction ID:</strong> ${sale.id}</p>
+            <p><strong>Customer:</strong> ${sale.customer_name}</p>
+            <p><strong>Date:</strong> ${sale.date}</p>
+            <p><strong>Payment Method:</strong> ${sale.payment_method || 'N/A'}</p>
+            <hr style="margin: 10px 0;">
+            <table style="width: 100%; text-align: left;">
+                <thead>
+                    <tr>
+                        <th>Item</th>
+                        <th>Qty</th>
+                        <th>Price</th>
+                        <th>Subtotal</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>${sale.product_name}</td>
+                        <td>${sale.quantity}</td>
+                        <td>${settings.currency_symbol}${Number(sale.amount / sale.quantity).toFixed(2)}</td>
+                        <td>${settings.currency_symbol}${subtotal.toFixed(2)}</td>
+                    </tr>
+                </tbody>
+            </table>
+            <hr style="margin: 10px 0;">
+            <p><strong>Subtotal:</strong> ${settings.currency_symbol}${subtotal.toFixed(2)}</p>
+            ${taxDetails.map(tax => `
+                <p><strong>${tax.name} (${tax.rate}%):</strong> ${settings.currency_symbol}${tax.amount.toFixed(2)}</p>
+            `).join('')}
+            <p><strong>Total:</strong> ${settings.currency_symbol}${totalAmount.toFixed(2)}</p>
+            <hr style="margin: 10px 0;">
+            <p>${settings.receipt_footer}</p>
+        </div>
     `;
+    
+    receiptBody.innerHTML = receiptHTML;
     openReceiptModal();
+}
+
+function printReceiptAfterCheckout(transactions) {
+    const receiptBody = document.getElementById('receipt-body');
+    let totalAmount = 0;
+    let totalTax = 0;
+    const taxDetailsMap = {};
+
+    const itemsHTML = transactions.map((sale, index) => {
+        const { totalTax: itemTax, taxDetails } = calculateTaxes(sale.amount / sale.quantity, sale.quantity);
+        const subtotal = Number(sale.amount) - itemTax;
+        totalAmount += Number(sale.amount);
+        totalTax += itemTax;
+
+        taxDetails.forEach(tax => {
+            if (!taxDetailsMap[tax.name]) {
+                taxDetailsMap[tax.name] = { rate: tax.rate, amount: 0 };
+            }
+            taxDetailsMap[tax.name].amount += tax.amount;
+        });
+
+        return `
+            <tr>
+                <td>${sale.product_name}</td>
+                <td>${sale.quantity}</td>
+                <td>${settings.currency_symbol}${Number(sale.amount / sale.quantity).toFixed(2)}</td>
+                <td>${settings.currency_symbol}${subtotal.toFixed(2)}</td>
+            </tr>
+        `;
+    }).join('');
+
+    const taxSummaryHTML = Object.keys(taxDetailsMap).map(name => `
+        <p><strong>${name} (${taxDetailsMap[name].rate}%):</strong> ${settings.currency_symbol}${taxDetailsMap[name].amount.toFixed(2)}</p>
+    `).join('');
+
+    const receiptHTML = `
+        <div style="text-align: ${settings.payment_summary_alignment}; width: ${settings.receipt_width}mm; font-family: 'Poppins', sans-serif;">
+            <h2>${settings.receipt_header}</h2>
+            <p><strong>${settings.store_name}</strong></p>
+            <p>${settings.address}</p>
+            <p>${settings.contact}</p>
+            <hr style="margin: 10px 0;">
+            <p><strong>Customer:</strong> ${transactions[0].customer_name}</p>
+            <p><strong>Date:</strong> ${transactions[0].date}</p>
+            <p><strong>Payment Method:</strong> ${transactions[0].payment_method}</p>
+            <hr style="margin: 10px 0;">
+            <table style="width: 100%; text-align: left;">
+                <thead>
+                    <tr>
+                        <th>Item</th>
+                        <th>Qty</th>
+                        <th>Price</th>
+                        <th>Subtotal</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${itemsHTML}
+                </tbody>
+            </table>
+            <hr style="margin: 10px 0;">
+            <p><strong>Subtotal:</strong> ${settings.currency_symbol}${(totalAmount - totalTax).toFixed(2)}</p>
+            ${taxSummaryHTML}
+            <p><strong>Total:</strong> ${settings.currency_symbol}${totalAmount.toFixed(2)}</p>
+            <hr style="margin: 10px 0;">
+            <p>${settings.receipt_footer}</p>
+        </div>
+    `;
+    
+    receiptBody.innerHTML = receiptHTML;
+
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+        <html>
+            <head>
+                <title>Receipt</title>
+                <style>
+                    @page { margin: 0; }
+                    body { 
+                        font-family: 'Poppins', sans-serif; 
+                        margin: 10mm; 
+                        width: ${settings.receipt_width}mm; 
+                        text-align: ${settings.payment_summary_alignment};
+                    }
+                    h2 { font-size: 1.5rem; }
+                    p { margin: 5px 0; }
+                    hr { margin: 10px 0; }
+                    table { width: 100%; border-collapse: collapse; }
+                    th, td { padding: 5px; text-align: left; }
+                    th { font-weight: bold; }
+                </style>
+            </head>
+            <body>${receiptHTML}</body>
+        </html>
+    `);
+    printWindow.document.close();
+
+    if (settings.auto_print == 1) {
+        printWindow.print();
+        printWindow.close();
+    } else {
+        openReceiptModal();
+    }
 }
 
 function printReceiptContent() {
@@ -522,9 +812,18 @@ function printReceiptContent() {
                 <title>Receipt</title>
                 <style>
                     @page { margin: 0; }
-                    body { font-family: 'Poppins', sans-serif; margin: 20px; }
+                    body { 
+                        font-family: 'Poppins', sans-serif; 
+                        margin: 10mm; 
+                        width: ${settings.receipt_width}mm; 
+                        text-align: ${settings.payment_summary_alignment};
+                    }
                     h2 { font-size: 1.5rem; }
                     p { margin: 5px 0; }
+                    hr { margin: 10px 0; }
+                    table { width: 100%; border-collapse: collapse; }
+                    th, td { padding: 5px; text-align: left; }
+                    th { font-weight: bold; }
                 </style>
             </head>
             <body>${receiptContent}</body>
@@ -535,59 +834,21 @@ function printReceiptContent() {
     printWindow.close();
 }
 
-function printReceiptAfterCheckout(transactions) {
-    const receiptBody = document.getElementById('receipt-body');
-    let receiptHTML = '<h2>Receipt</h2>';
-    transactions.forEach((sale, index) => {
-        receiptHTML += `
-            <p><strong>Transaction ${index + 1}:</strong></p>
-            <p><strong>Store:</strong> ${sale.store_name}</p>
-            <p><strong>Product:</strong> ${sale.product_name}</p>
-            <p><strong>Quantity:</strong> ${sale.quantity}</p>
-            <p><strong>Amount:</strong> $${Number(sale.amount).toFixed(2)}</p>
-            ${index < transactions.length - 1 ? '<hr>' : ''}
-        `;
-    });
-    receiptHTML += `
-        <p><strong>Customer:</strong> ${transactions[0].customer_name}</p>
-        <p><strong>Date:</strong> ${transactions[0].date}</p>
-        <p><strong>Payment Method:</strong> ${transactions[0].payment_method}</p>
-        <p><strong>Total Amount:</strong> $${Number(transactions.reduce((sum, sale) => sum + Number(sale.amount), 0)).toFixed(2)}</p>
-    `;
-    receiptBody.innerHTML = receiptHTML;
-
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
-        <html>
-            <head>
-                <title>Receipt</title>
-                <style>
-                    @page { margin: 0; }
-                    body { font-family: 'Poppins', sans-serif; margin: 20px; }
-                    h2 { font-size: 1.5rem; }
-                    p { margin: 5px 0; }
-                    hr { margin: 10px 0; }
-                </style>
-            </head>
-            <body>${receiptHTML}</body>
-        </html>
-    `);
-    printWindow.document.close();
-    printWindow.print();
-    printWindow.close();
-}
-
-// Fetch sales with pagination
+// Fetch sales
 let currentPage = 1;
 async function fetchSales(page) {
     const rowsPerPage = document.getElementById('rows-per-page').value;
     const statusFilter = document.getElementById('status-filter').value;
+    const storeId = '<?php echo isset($_SESSION['store_id']) ? $_SESSION['store_id'] : ''; ?>';
 
     const salesTable = document.getElementById('sales-table');
     salesTable.innerHTML = '<tr><td colspan="10" class="p-3 text-center">Loading...</td></tr>';
 
     try {
-        const response = await fetch(`fetch_sales.php?page=${page}&rows_per_page=${rowsPerPage}${statusFilter ? `&status=${statusFilter}` : ''}`);
+        const response = await fetch(`fetch_sales.php?page=${page}&rows_per_page=${rowsPerPage}${statusFilter ? `&status=${statusFilter}` : ''}${storeId ? `&store_id=${storeId}` : ''}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
         const data = await response.json();
 
         if (data.success) {
@@ -595,13 +856,13 @@ async function fetchSales(page) {
             salesTable.innerHTML = '';
             data.sales.forEach(sale => {
                 const row = `
-                    <tr class="table-row border-b border-gray-200 dark:border-gray-700" data-status="${sale.status}" data-store="${sale.store_id}">
+                    <tr class="border-b border-gray-200 dark:border-gray-700">
                         <td class="p-3">${sale.id}</td>
                         <td class="p-3">${sale.store_name}</td>
                         <td class="p-3">${sale.product_name}</td>
                         <td class="p-3">${sale.customer_name}</td>
                         <td class="p-3">${sale.quantity}</td>
-                        <td class="p-3">$${Number(sale.amount).toFixed(2)}</td>
+                        <td class="p-3">${currencySymbol}${Number(sale.amount).toFixed(2)}</td>
                         <td class="p-3">${sale.date}</td>
                         <td class="p-3">${sale.payment_method || 'N/A'}</td>
                         <td class="p-3">
@@ -622,11 +883,12 @@ async function fetchSales(page) {
             });
 
             updatePagination(data.total_pages, data.current_page);
-            feather.replace();
+            safeFeatherReplace();
         } else {
-            showMessage(data.message, false);
+            showMessage(data.message || 'Failed to fetch sales.', false);
         }
     } catch (error) {
+        console.error('Fetch sales error:', error);
         showMessage('Error fetching sales: ' + error.message, false);
     }
 }
@@ -649,10 +911,8 @@ function updatePagination(totalPages, currentPage) {
     nextButton.disabled = currentPage === totalPages;
 }
 
-// Initial sales fetch
 fetchSales(1);
 
-// Confirm delete
 function confirmDelete(id, customerName) {
     if (confirm(`Are you sure you want to delete the sale for ${customerName}?`)) {
         const form = document.createElement('form');
@@ -666,9 +926,20 @@ function confirmDelete(id, customerName) {
         form.submit();
     }
 }
+
+function openReceiptModal() {
+    document.getElementById('receipt-modal').classList.remove('hidden');
+}
+
+function closeReceiptModal() {
+    document.getElementById('receipt-modal').classList.add('hidden');
+}
+
+function safeFeatherReplace() {
+    if (typeof feather !== 'undefined') {
+        feather.replace();
+    }
+}
 </script>
 
-<?php
-// Include footer
-require_once __DIR__ . '/includes/footer.php';
-?>
+<?php require_once __DIR__ . '/includes/footer.php'; ?>

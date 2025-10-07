@@ -1,6 +1,35 @@
 <?php
 // Ensure config is included before header
 require_once __DIR__ . '/../config.php';
+
+// Initialize user array for header
+$user = [
+    'name' => $_SESSION['username'] ?? 'John Doe',
+    'role' => $_SESSION['role'] ?? 'Mall Admin',
+    'store' => 'Unknown Store' // Default; will be updated below
+];
+
+// Fetch store name for the logged-in user
+if (isset($_SESSION['store_id'])) {
+    $store_query = "SELECT store_name FROM stores WHERE id = ? AND status = 'Active'";
+    $stmt = mysqli_prepare($conn, $store_query);
+    if ($stmt) {
+        mysqli_stmt_bind_param($stmt, 'i', $_SESSION['store_id']);
+        mysqli_stmt_execute($stmt);
+        $store_result = mysqli_stmt_get_result($stmt);
+        if ($store_row = mysqli_fetch_assoc($store_result)) {
+            $user['store'] = $store_row['store_name'];
+        } else {
+            error_log("No active store found for store_id: {$_SESSION['store_id']}");
+            $user['store'] = 'No Store Assigned';
+        }
+        mysqli_stmt_close($stmt);
+    } else {
+        error_log("Error preparing store query: " . mysqli_error($conn));
+    }
+} else {
+    error_log("No store_id set for user_id: {$_SESSION['user_id']}");
+}
 ?>
 
 <!DOCTYPE html>
@@ -99,30 +128,30 @@ require_once __DIR__ . '/../config.php';
                     <i data-feather="menu" class="w-5 h-5"></i>
                 </button>
             </div>
-                <nav class="mt-4">
-                    <?php
-                    $nav_items = [
-                        ['name' => 'Dashboard', 'icon' => 'home', 'url' => 'index.php'],
-                        ['name' => 'Sales', 'icon' => 'dollar-sign', 'url' => 'sales.php'],
-                        ['name' => 'Inventory', 'icon' => 'package', 'url' => 'inventory.php'],
-                        ['name' => 'Transactions', 'icon' => 'file-text', 'url' => 'transactions.php'],
-                        ['name' => 'Customers', 'icon' => 'users', 'url' => 'customers.php'],
-                        ['name' => 'Reports', 'icon' => 'bar-chart-2', 'url' => 'reports.php'],
-                        ['name' => 'Stores', 'icon' => 'shopping-cart', 'url' => 'stores.php'],
-                        ['name' => 'Users', 'icon' => 'users', 'url' => 'users.php'],
-                        ['name' => 'Settings', 'icon' => 'settings', 'url' => 'settings.php'],
-                        ['name' => 'Log Out', 'icon' => 'power', 'url' => 'logout.php'],
-                    ];
-                    $current_page = isset($page_title) ? $page_title : '';
-                    foreach ($nav_items as $item) {
-                        $active = $item['name'] === $current_page ? 'bg-primary/80' : '';
-                        echo "<a href='{$item['url']}' class='flex items-center p-4 hover:bg-primary/80 transition rounded-lg mx-2 $active'>
-                                <i data-feather='{$item['icon']}' class='w-5 h-5'></i>
-                                <span id='nav-{$item['name']}' class='ml-3 text-sm font-medium'>{$item['name']}</span>
-                            </a>";
-                    }
-                    ?>
-                </nav>
+            <nav class="mt-4">
+                <?php
+                $nav_items = [
+                    ['name' => 'Dashboard', 'icon' => 'home', 'url' => 'index.php'],
+                    ['name' => 'Sales', 'icon' => 'dollar-sign', 'url' => 'sales.php'],
+                    ['name' => 'Inventory', 'icon' => 'package', 'url' => 'inventory.php'],
+                    ['name' => 'Transactions', 'icon' => 'file-text', 'url' => 'transactions.php'],
+                    ['name' => 'Customers', 'icon' => 'users', 'url' => 'customers.php'],
+                    ['name' => 'Reports', 'icon' => 'bar-chart-2', 'url' => 'reports.php'],
+                    ['name' => 'Stores', 'icon' => 'shopping-cart', 'url' => 'stores.php'],
+                    ['name' => 'Users', 'icon' => 'users', 'url' => 'users.php'],
+                    ['name' => 'Settings', 'icon' => 'settings', 'url' => 'settings.php'],
+                    ['name' => 'Log Out', 'icon' => 'power', 'url' => 'logout.php'],
+                ];
+                $current_page = isset($page_title) ? $page_title : '';
+                foreach ($nav_items as $item) {
+                    $active = $item['name'] === $current_page ? 'bg-primary/80' : '';
+                    echo "<a href='{$item['url']}' class='flex items-center p-4 hover:bg-primary/80 transition rounded-lg mx-2 $active'>
+                            <i data-feather='{$item['icon']}' class='w-5 h-5'></i>
+                            <span id='nav-{$item['name']}' class='ml-3 text-sm font-medium'>{$item['name']}</span>
+                          </a>";
+                }
+                ?>
+            </nav>
         </div>
 
         <!-- Main Content -->
@@ -134,15 +163,10 @@ require_once __DIR__ . '/../config.php';
                         <input type="text" id="search-sales" placeholder="Search sales..." class="pl-10 pr-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary" oninput="filterSales()">
                         <i data-feather="search" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-neutral"></i>
                     </div>
-                    <select id="store-filter" class="p-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm" onchange="filterSales()">
-                        <option value="">All Stores</option>
-                        <?php
-                        $stores_query = "SELECT id, store_name FROM stores WHERE status = 'Active'";
-                        $stores_result = mysqli_query($conn, $stores_query);
-                        $stores = $stores_result ? mysqli_fetch_all($stores_result, MYSQLI_ASSOC) : [];
-                        foreach ($stores as $store): ?>
-                            <option value="<?php echo $store['id']; ?>"><?php echo htmlspecialchars($store['store_name']); ?></option>
-                        <?php endforeach; ?>
+                    <select id="store-filter" class="p-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm" disabled>
+                        <option value="<?php echo isset($_SESSION['store_id']) ? $_SESSION['store_id'] : ''; ?>">
+                            <?php echo htmlspecialchars($user['store']); ?>
+                        </option>
                     </select>
                 </div>
                 <div class="flex items-center space-x-4">
