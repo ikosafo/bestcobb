@@ -556,8 +556,7 @@ async function processCheckout() {
         customerName,
         customerNameTrimmed: customerName.trim(),
         paymentMethod,
-        date,
-        cart: <?php echo json_encode($_SESSION['cart'] ?? []); ?>
+        date
     });
 
     // Validate inputs
@@ -578,40 +577,58 @@ async function processCheckout() {
         return;
     }
 
-    const cart = <?php echo json_encode($_SESSION['cart'] ?? []); ?>;
-    if (!cart.length) {
-        showMessage('Cart is empty. Add items before checking out.', false);
-        return;
-    }
-
-    // Validate cart totals
-    let total = 0;
-    for (const item of cart) {
-        const subtotal = Number(item.subtotal) || 0;
-        if (isNaN(subtotal)) {
-            showMessage('Invalid cart data. Please clear cart and try again.', false);
-            return;
-        }
-        total += subtotal;
-    }
-
     const button = document.querySelector('#checkout-form button[onclick="processCheckout()"]');
     button.disabled = true;
     button.innerHTML = '<i data-feather="loader" class="w-4 h-4 mr-2 animate-spin"></i> Processing...';
     safeFeatherReplace();
 
     try {
-        const response = await fetch('checkout.php', {
+        // Fetch the latest cart from the server
+        const cartResponse = await fetch('get_cart.php', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!cartResponse.ok) {
+            throw new Error(`HTTP error! Status: ${cartResponse.status}`);
+        }
+
+        const cartData = await cartResponse.json();
+        if (!cartData.success) {
+            throw new Error(cartData.message || 'Failed to fetch cart.');
+        }
+
+        const cart = cartData.cart;
+        console.log('Fetched Cart:', cart); // Debugging
+
+        if (!cart.length) {
+            showMessage('Cart is empty. Add items before checking out.', false);
+            return;
+        }
+
+        // Validate cart totals
+        let total = 0;
+        for (const item of cart) {
+            const subtotal = Number(item.subtotal) || 0;
+            if (isNaN(subtotal)) {
+                showMessage('Invalid cart data. Please clear cart and try again.', false);
+                return;
+            }
+            total += subtotal;
+        }
+
+        // Proceed with checkout
+        const checkoutResponse = await fetch('checkout.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: `action=checkout&customer_name=${encodeURIComponent(customerName.trim())}&payment_method=${encodeURIComponent(paymentMethod)}&date=${encodeURIComponent(date)}`
         });
 
-        if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}`);
+        if (!checkoutResponse.ok) {
+            throw new Error(`HTTP error! Status: ${checkoutResponse.status}`);
         }
 
-        const data = await response.json();
+        const data = await checkoutResponse.json();
 
         if (data.success) {
             updateCartTable([], '0.00');
