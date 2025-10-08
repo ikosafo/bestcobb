@@ -258,6 +258,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                             continue;
                         }
 
+                        // Validate store_id
                         $store_query = "SELECT id FROM stores WHERE store_name = ? AND status = 'Active'";
                         $stmt = mysqli_prepare($conn, $store_query);
                         mysqli_stmt_bind_param($stmt, 's', $store_name);
@@ -272,35 +273,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         }
                         mysqli_stmt_close($stmt);
 
+                        // Escape values to prevent SQL injection
+                        $escaped_name = mysqli_real_escape_string($conn, $name);
+                        $escaped_category = mysqli_real_escape_string($conn, $category);
+                        $escaped_store_id = (int)$store_id; // Integer, no escaping needed
+                        $escaped_stock = (int)$stock; // Integer, no escaping needed
+                        $escaped_price = (float)$price; // Float, no escaping needed
+                        $escaped_status = mysqli_real_escape_string($conn, $status);
+                        $escaped_barcode = mysqli_real_escape_string($conn, $barcode);
+
                         if ($id) {
-                            $check_query = "SELECT id FROM products WHERE id = ?";
-                            $check_stmt = mysqli_prepare($conn, $check_query);
-                            mysqli_stmt_bind_param($check_stmt, 'i', $id);
-                            mysqli_stmt_execute($check_stmt);
-                            $check_result = mysqli_stmt_get_result($check_stmt);
-                            if (mysqli_num_rows($check_result) > 0) {
-                                $query = "UPDATE products SET name = ?, category = ?, store_id = ?, stock = ?, price = ?, status = ?, barcode = ? WHERE id = ?";
-                                $stmt = mysqli_prepare($conn, $query);
-                                mysqli_stmt_bind_param($stmt, 'ssisdssi', $name, $category, $store_id, $stock, $price, $status, $barcode, $id);
-                            } else {
-                                $query = "INSERT INTO products (id, name, category, store_id, stock, price, status, barcode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-                                $stmt = mysqli_prepare($conn, $query);
-                                mysqli_stmt_bind_param($stmt, 'issisdss', $id, $name, $category, $store_id, $stock, $price, $status, $barcode);
+                            $escaped_id = (int)$id; // Integer, no escaping needed
+                            // Check if product exists
+                            $check_query = "SELECT id FROM products WHERE id = $escaped_id";
+                            $check_result = mysqli_query($conn, $check_query);
+                            if (!$check_result) {
+                                error_log("Error checking product ID $escaped_id: " . mysqli_error($conn));
+                                $error_count++;
+                                continue;
                             }
-                            mysqli_stmt_close($check_stmt);
+                            if (mysqli_num_rows($check_result) > 0) {
+                                // Update existing product
+                                $query = "UPDATE products SET `name` = '$escaped_name', category = '$escaped_category', store_id = $escaped_store_id, stock = $escaped_stock, price = $escaped_price, `status` = '$escaped_status', barcode = '$escaped_barcode' WHERE id = $escaped_id";
+                            } else {
+                                // Insert new product with ID
+                                $query = "INSERT INTO products (id, name, category, store_id, stock, price, status, barcode) VALUES ($escaped_id, '$escaped_name', '$escaped_category', $escaped_store_id, $escaped_stock, $escaped_price, '$escaped_status', '$escaped_barcode')";
+                            }
+                            mysqli_free_result($check_result);
                         } else {
-                            $query = "INSERT INTO products (name, category, store_id, stock, price, status, barcode) VALUES (?, ?, ?, ?, ?, ?, ?)";
-                            $stmt = mysqli_prepare($conn, $query);
-                            mysqli_stmt_bind_param($stmt, 'ssisds', $name, $category, $store_id, $stock, $price, $status, $barcode);
+                            // Insert new product without ID (auto-increment)
+                            $query = "INSERT INTO products (name, category, store_id, stock, price, status, barcode) VALUES ('$escaped_name', '$escaped_category', $escaped_store_id, $escaped_stock, $escaped_price, '$escaped_status', '$escaped_barcode')";
                         }
 
-                        if (mysqli_stmt_execute($stmt)) {
+                        // Execute the query
+                        if (mysqli_query($conn, $query)) {
                             $success_count++;
                         } else {
                             error_log("Error importing product: " . mysqli_error($conn) . " - Row: " . json_encode($row));
                             $error_count++;
                         }
-                        mysqli_stmt_close($stmt);
                     }
                     $success_message = "Imported $success_count products successfully. $error_count errors occurred.";
                     error_log("Import completed: $success_count successes, $error_count errors");
@@ -333,11 +344,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
         if ($_POST['action'] === 'add') {
             $query = "INSERT INTO products (name, category, store_id, stock, price, status, barcode) VALUES (?, ?, ?, ?, ?, ?, ?)";
             $stmt = mysqli_prepare($conn, $query);
-            mysqli_stmt_bind_param($stmt, 'ssisds', $name, $category, $store_id, $stock, $price, $status, $barcode);
+            mysqli_stmt_bind_param($stmt, 'ssiidss', $name, $category, $store_id, $stock, $price, $status, $barcode); // Corrected
         } else {
             $query = "UPDATE products SET name = ?, category = ?, store_id = ?, stock = ?, price = ?, status = ?, barcode = ? WHERE id = ?";
             $stmt = mysqli_prepare($conn, $query);
-            mysqli_stmt_bind_param($stmt, 'ssisdssi', $name, $category, $store_id, $stock, $price, $status, $barcode, $product_id);
+            mysqli_stmt_bind_param($stmt, 'ssisdsdsi', $name, $category, $store_id, $stock, $price, $status, $barcode, $product_id);
         }
         if (mysqli_stmt_execute($stmt)) {
             $success_message = $_POST['action'] === 'add' ? 'Product added successfully!' : 'Product updated successfully!';
