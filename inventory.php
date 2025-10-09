@@ -777,155 +777,156 @@ require_once __DIR__ . '/includes/header.php';
                                         </button>
                                     </td>
                                 </tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-4">
+                <button type="button" onclick="closeCategoriesModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
+                    <i data-feather="x" class="w-4 h-4 mr-2"></i> Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Add/Edit Category -->
+    <div id="category-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-md modal-content">
+            <h2 id="category-modal-title" class="text-lg font-semibold mb-4"></h2>
+            <form id="category-form" method="POST" action="inventory.php" class="space-y-4">
+                <input type="hidden" name="action" id="category-form-action">
+                <input type="hidden" name="category_id" id="category-id">
+                <div>
+                    <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Category Name <span class="text-red-500">*</span></label>
+                    <input type="text" name="name" id="category-name" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary" required>
                 </div>
-                <div class="mt-4">
-                    <button type="button" onclick="closeCategoriesModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
-                        <i data-feather="x" class="w-4 h-4 mr-2"></i> Close
+                <div class="flex space-x-4">
+                    <button type="submit" class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
+                        <i data-feather="save" class="w-4 h-4 mr-2"></i> Save
+                    </button>
+                    <button type="button" onclick="closeCategoryModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
+                        <i data-feather="x" class="w-4 h-4 mr-2"></i> Cancel
                     </button>
                 </div>
-            </div>
+            </form>
         </div>
+    </div>
 
-        <!-- Modal for Add/Edit Category -->
-        <div id="category-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-md modal-content">
-                <h2 id="category-modal-title" class="text-lg font-semibold mb-4"></h2>
-                <form id="category-form" method="POST" action="inventory.php" class="space-y-4">
-                    <input type="hidden" name="action" id="category-form-action">
-                    <input type="hidden" name="category_id" id="category-id">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Category Name <span class="text-red-500">*</span></label>
-                        <input type="text" name="name" id="category-name" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary" required>
-                    </div>
-                    <div class="flex space-x-4">
-                        <button type="submit" class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
-                            <i data-feather="save" class="w-4 h-4 mr-2"></i> Save
-                        </button>
-                        <button type="button" onclick="closeCategoryModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
-                            <i data-feather="x" class="w-4 h-4 mr-2"></i> Cancel
-                        </button>
-                    </div>
-                </form>
-            </div>
+    <!-- Import Excel Modal -->
+    <div id="import-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-md">
+            <h2 class="text-lg font-semibold mb-4">Import Products from Excel</h2>
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                Upload an Excel file with columns: ID (optional), Product Name, Category, Store Name, Stock, Price, Status (In Stock, Low Stock, or Out of Stock), Barcode.
+            </p>
+            <form id="import-form" method="POST" action="inventory.php" enctype="multipart/form-data" class="space-y-4">
+                <input type="hidden" name="action" value="import">
+                <div>
+                    <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Excel File <span class="text-red-500">*</span></label>
+                    <input type="file" name="import_file" accept=".xlsx,.xls" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none" required>
+                </div>
+                <div class="flex space-x-4">
+                    <button type="submit" class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
+                        <i data-feather="upload" class="w-4 h-4 mr-2"></i> Import
+                    </button>
+                    <button type="button" onclick="closeImportModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
+                        <i data-feather="x" class="w-4 h-4 mr-2"></i> Cancel
+                    </button>
+                </div>
+            </form>
         </div>
+    </div>
+</main>
 
-        <!-- Import Excel Modal -->
-        <div id="import-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-md">
-                <h2 class="text-lg font-semibold mb-4">Import Products from Excel</h2>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                    Upload an Excel file with columns: ID (optional), Product Name, Category, Store Name, Stock, Price, Status (In Stock, Low Stock, or Out of Stock), Barcode.
-                </p>
-                <form id="import-form" method="POST" action="inventory.php" enctype="multipart/form-data" class="space-y-4">
-                    <input type="hidden" name="action" value="import">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Excel File <span class="text-red-500">*</span></label>
-                        <input type="file" name="import_file" accept=".xlsx,.xls" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none" required>
-                    </div>
-                    <div class="flex space-x-4">
-                        <button type="submit" class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
-                            <i data-feather="upload" class="w-4 h-4 mr-2"></i> Import
-                        </button>
-                        <button type="button" onclick="closeImportModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
-                            <i data-feather="x" class="w-4 h-4 mr-2"></i> Cancel
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </main>
+<script>
+    // Initialize Feather Icons
+    feather.replace();
 
-    <script>
-        // Initialize Feather Icons
+    // Modal handling for Add/Edit Product
+    function openModal(action, product = {}) {
+        const modal = document.getElementById('product-modal');
+        const title = document.getElementById('modal-title');
+        document.getElementById('form-action').value = action;
+        title.textContent = action === 'add' ? 'Add Product' : 'Edit Product';
+        
+        document.getElementById('product-id').value = product.id || '';
+        document.getElementById('product-name').value = product.name || '';
+        document.getElementById('product-category').value = product.category || '';
+        document.getElementById('product-store-id').value = product.store_id || '';
+        document.getElementById('product-stock').value = product.stock || '';
+        document.getElementById('product-price').value = product.price || '';
+        document.getElementById('product-status').value = product.status || 'In Stock';
+        document.getElementById('product-barcode').value = product.barcode || '';
+        
+        modal.classList.remove('hidden');
         feather.replace();
+    }
 
-        // Modal handling for Add/Edit Product
-        function openModal(action, product = {}) {
-            const modal = document.getElementById('product-modal');
-            const title = document.getElementById('modal-title');
-            document.getElementById('form-action').value = action;
-            title.textContent = action === 'add' ? 'Add Product' : 'Edit Product';
-            
-            document.getElementById('product-id').value = product.id || '';
-            document.getElementById('product-name').value = product.name || '';
-            document.getElementById('product-category').value = product.category || '';
-            document.getElementById('product-store-id').value = product.store_id || '';
-            document.getElementById('product-stock').value = product.stock || '';
-            document.getElementById('product-price').value = product.price || '';
-            document.getElementById('product-status').value = product.status || 'In Stock';
-            document.getElementById('product-barcode').value = product.barcode || '';
-            
-            modal.classList.remove('hidden');
-            feather.replace();
-        }
+    function closeModal() {
+        document.getElementById('product-modal').classList.add('hidden');
+        document.getElementById('product-form').reset();
+    }
 
-        function closeModal() {
-            document.getElementById('product-modal').classList.add('hidden');
-            document.getElementById('product-form').reset();
-        }
+    // Modal handling for Manage Categories
+    function openCategoriesModal() {
+        document.getElementById('categories-modal').classList.remove('hidden');
+        feather.replace();
+    }
 
-        // Modal handling for Manage Categories
-        function openCategoriesModal() {
-            document.getElementById('categories-modal').classList.remove('hidden');
-            feather.replace();
-        }
+    function closeCategoriesModal() {
+        document.getElementById('categories-modal').classList.add('hidden');
+    }
 
-        function closeCategoriesModal() {
-            document.getElementById('categories-modal').classList.add('hidden');
-        }
+    // Modal handling for Add/Edit Category
+    function openCategoryModal(action, category = {}) {
+        const modal = document.getElementById('category-modal');
+        const title = document.getElementById('category-modal-title');
+        document.getElementById('category-form-action').value = action + '_category';
+        title.textContent = action === 'add' ? 'Add Category' : 'Edit Category';
+        
+        document.getElementById('category-id').value = category.id || '';
+        document.getElementById('category-name').value = category.name || '';
+        
+        modal.classList.remove('hidden');
+        feather.replace();
+    }
 
-        // Modal handling for Add/Edit Category
-        function openCategoryModal(action, category = {}) {
-            const modal = document.getElementById('category-modal');
-            const title = document.getElementById('category-modal-title');
-            document.getElementById('category-form-action').value = action + '_category';
-            title.textContent = action === 'add' ? 'Add Category' : 'Edit Category';
-            
-            document.getElementById('category-id').value = category.id || '';
-            document.getElementById('category-name').value = category.name || '';
-            
-            modal.classList.remove('hidden');
-            feather.replace();
-        }
+    function closeCategoryModal() {
+        document.getElementById('category-modal').classList.add('hidden');
+        document.getElementById('category-form').reset();
+    }
 
-        function closeCategoryModal() {
-            document.getElementById('category-modal').classList.add('hidden');
-            document.getElementById('category-form').reset();
-        }
+    // Modal handling for Import
+    function openImportModal() {
+        document.getElementById('import-modal').classList.remove('hidden');
+        feather.replace();
+    }
 
-        // Modal handling for Import
-        function openImportModal() {
-            document.getElementById('import-modal').classList.remove('hidden');
-            feather.replace();
-        }
+    function closeImportModal() {
+        document.getElementById('import-modal').classList.add('hidden');
+        document.getElementById('import-form').reset();
+    }
 
-        function closeImportModal() {
-            document.getElementById('import-modal').classList.add('hidden');
-            document.getElementById('import-form').reset();
-        }
-
-        // Product filtering
-        function filterProducts() {
-            const search = document.getElementById('search-products').value.toLowerCase();
-            const store = document.getElementById('store-filter').value;
-            const status = document.getElementById('status-filter').value;
-            const rows = document.querySelectorAll('#product-table tr');
-            
-            rows.forEach(row => {
-                const name = row.children[1]?.textContent.toLowerCase() || '';
-                const category = row.children[2]?.textContent.toLowerCase() || '';
-                const rowStore = row.getAttribute('data-store') || '';
-                const rowStatus = row.getAttribute('data-status') || '';
-                const matchesSearch = name.includes(search) || category.includes(search);
-                const matchesStore = !store || rowStore === store;
-                const matchesStatus = !status || rowStatus === status;
-                row.style.display = matchesSearch && matchesStore && matchesStatus ? '' : 'none';
-            });
-        }
-    </script>
+    // Product filtering
+    function filterProducts() {
+        const search = document.getElementById('search-products').value.toLowerCase();
+        const store = document.getElementById('store-filter').value;
+        const status = document.getElementById('status-filter').value;
+        const rows = document.querySelectorAll('#product-table tr');
+        
+        rows.forEach(row => {
+            const name = row.children[1]?.textContent.toLowerCase() || '';
+            const category = row.children[2]?.textContent.toLowerCase() || '';
+            const rowStore = row.getAttribute('data-store') || '';
+            const rowStatus = row.getAttribute('data-status') || '';
+            const matchesSearch = name.includes(search) || category.includes(search);
+            const matchesStore = !store || rowStore === store;
+            const matchesStatus = !status || rowStatus === status;
+            row.style.display = matchesSearch && matchesStore && matchesStatus ? '' : 'none';
+        });
+    }
+</script>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
 <?php mysqli_close($conn); ?>
