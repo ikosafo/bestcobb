@@ -617,7 +617,7 @@ require_once __DIR__ . '/includes/header.php';
                                 <td class="p-3"><?php echo htmlspecialchars($product['category'], ENT_QUOTES, 'UTF-8'); ?></td>
                                 <td class="p-3"><?php echo htmlspecialchars($product['store_name'], ENT_QUOTES, 'UTF-8'); ?></td>
                                 <td class="p-3"><?php echo htmlspecialchars($product['stock'], ENT_QUOTES, 'UTF-8'); ?></td>
-                                <td class="p-3"><?php echo htmlspecialchars($currency_symbol, ENT_QUOTES, 'UTF-8') . number_format($product['price'], 2); ?></td>
+                                <td class="p-3"><?php echo htmlspecialchars($currency_symbol, ENT_QUOTES, 'UTF-8') . (is_numeric($product['price']) ? number_format($product['price'], 2) : '0.00'); ?></td>
                                 <td class="p-3">
                                     <span class="px-2 py-1 text-xs font-medium rounded-full <?php 
                                         echo $product['status'] == 'In Stock' ? 'bg-green-100 text-green-700' : 
