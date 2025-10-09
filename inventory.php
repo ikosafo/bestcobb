@@ -549,9 +549,28 @@ require_once __DIR__ . '/includes/header.php';
         </div>
     <?php endif; ?>
 
+    
     <!-- Inventory Table -->
     <div class="card bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 mb-6">
-        <div class="flex justify-between items-center mb-4">
+        
+        
+     <!-- Buttons Row -->
+        <div class="flex justify-end items-center mb-4 space-x-2">
+            <button onclick="openModal('add')" class="bg-primary text-white px-3 py-1 rounded-lg hover:bg-primary/90 transition flex items-center">
+                <i data-feather="plus" class="w-4 h-4 mr-1"></i> Add Product
+            </button>
+            <a href="inventory.php?export=true" class="bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 transition flex items-center">
+                <i data-feather="download" class="w-4 h-4 mr-1"></i> Export to Excel
+            </a>
+            <button onclick="openImportModal()" class="bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 transition flex items-center">
+                <i data-feather="upload" class="w-4 h-4 mr-1"></i> Import Excel
+            </button>
+            <button onclick="openCategoriesModal()" class="bg-purple-600 text-white px-3 py-1 rounded-lg hover:bg-purple-700 transition flex items-center">
+                <i data-feather="list" class="w-4 h-4 mr-1"></i> Manage Categories
+            </button>
+        </div>
+    
+         <div class="flex justify-between items-center mb-4">
             <h2 class="text-lg font-semibold">Inventory Management</h2>
             <div class="flex items-center space-x-4">
                 <div class="relative">
@@ -570,22 +589,7 @@ require_once __DIR__ . '/includes/header.php';
                     <option value="Out of Stock">Out of Stock</option>
                     <option value="Low Stock">Low Stock</option>
                 </select>
-                <button onclick="openModal('add')" class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
-                    <i data-feather="plus" class="w-4 h-4 mr-2"></i> Add Product
-                </button>
-                <p>
-                    <a href="inventory.php?export=true" class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent/90 transition flex items-center">
-                        <i data-feather="download" class="w-4 h-4 mr-2"></i> Export Excel
-                    </a>
-                    <br>
-                    <button onclick="openImportModal()" class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent/90 transition flex items-center">
-                        <i data-feather="upload" class="w-4 h-4 mr-2"></i> Import Excel
-                    </button>
-                    <br>
-                    <button onclick="openCategoriesModal()" class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent/90 transition flex items-center">
-                        <i data-feather="list" class="w-4 h-4 mr-2"></i> Manage Categories
-                    </button>
-                </p>
+                
             </div>
         </div>
         <div class="overflow-x-auto">
