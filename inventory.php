@@ -269,7 +269,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['export'])) {
     $sheet->fromArray($headers, null, 'A1');
 
     // Fetch products for export
-    $products_query = "SELECT p.id, p.name, p.category, s.store_name, p.stock, p.price, p.status, p.barcode 
+    $products_query = "SELECT p.id, p.name, p.category, s.store_name, p.stock, COALESCE(p.price, 0) as price, p.status, p.barcode 
                        FROM products p LEFT JOIN stores s ON p.store_id = s.id ORDER BY p.id DESC";
     $products_result = mysqli_query($conn, $products_query);
     $row_number = 2;
@@ -341,11 +341,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         $category = trim(filter_var($row[2], FILTER_SANITIZE_SPECIAL_CHARS) ?: '');
                         $store_name = trim(filter_var($row[3], FILTER_SANITIZE_SPECIAL_CHARS) ?: '');
                         $stock = filter_var($row[4], FILTER_VALIDATE_INT) ?: null;
-                        $price = filter_var($row[5], FILTER_VALIDATE_FLOAT) ?: null;
+                        $price = filter_var($row[5], FILTER_VALIDATE_FLOAT) !== false ? filter_var($row[5], FILTER_VALIDATE_FLOAT) : 0.00;
                         $status = trim(filter_var($row[6], FILTER_SANITIZE_SPECIAL_CHARS) ?: '');
                         $barcode = trim(filter_var($row[7], FILTER_SANITIZE_SPECIAL_CHARS) ?: '');
 
-                        if (!$name || !$category || !$store_name || $stock === null || $price === null || !$status) {
+                        if (!$name || !$category || !$store_name || $stock === null || !$status) {
                             error_log("Skipping row due to missing fields: " . json_encode($row));
                             $error_count++;
                             continue;
@@ -460,7 +460,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
     $status = trim(filter_input(INPUT_POST, 'status', FILTER_SANITIZE_SPECIAL_CHARS) ?: '');
     $barcode = trim(filter_input(INPUT_POST, 'barcode', FILTER_SANITIZE_SPECIAL_CHARS) ?: '');
 
-    if ($name && $category && $store_id && $stock !== null && $price !== null && $status) {
+    if ($name && $category && $store_id && $stock !== null && $price !== null && is_numeric($price) && $status) {
         if ($_POST['action'] === 'add') {
             $query = "INSERT INTO products (name, category, store_id, stock, price, status, barcode) VALUES (?, ?, ?, ?, ?, ?, ?)";
             $stmt = mysqli_prepare($conn, $query);
@@ -479,13 +479,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
         }
         mysqli_stmt_close($stmt);
     } else {
-        $error_message = 'Please fill in all required fields.';
-        error_log("Missing required fields in product form: " . print_r($_POST, true));
+        $error_message = 'Please fill in all required fields with valid values.';
+        error_log("Missing or invalid required fields in product form: " . print_r($_POST, true));
     }
 }
 
 // Fetch products
-$products_query = "SELECT p.id, p.name, p.category, p.store_id, p.stock, p.price, p.status, p.barcode, s.store_name 
+$products_query = "SELECT p.id, p.name, p.category, p.store_id, p.stock, COALESCE(p.price, 0) as price, p.status, p.barcode, s.store_name 
                    FROM products p LEFT JOIN stores s ON p.store_id = s.id ORDER BY p.id DESC";
 $products_result = mysqli_query($conn, $products_query);
 $products = [];
@@ -529,7 +529,7 @@ $total_products = count($products);
 $low_stock_query = "SELECT COUNT(*) as count FROM products WHERE stock < 10";
 $low_stock_result = mysqli_query($conn, $low_stock_query);
 $low_stock_items = $low_stock_result ? mysqli_fetch_assoc($low_stock_result)['count'] : 0;
-$total_value_query = "SELECT SUM(stock * price) as total FROM products";
+$total_value_query = "SELECT COALESCE(SUM(stock * COALESCE(price, 0)), 0) as total FROM products";
 $total_value_result = mysqli_query($conn, $total_value_query);
 $total_value = $total_value_result ? mysqli_fetch_assoc($total_value_result)['total'] : 0;
 
@@ -573,7 +573,6 @@ require_once __DIR__ . '/includes/header.php';
                 <button onclick="openModal('add')" class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
                     <i data-feather="plus" class="w-4 h-4 mr-2"></i> Add Product
                 </button>
-                
                 <p>
                     <a href="inventory.php?export=true" class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent/90 transition flex items-center">
                         <i data-feather="download" class="w-4 h-4 mr-2"></i> Export Excel
@@ -617,7 +616,7 @@ require_once __DIR__ . '/includes/header.php';
                                 <td class="p-3"><?php echo htmlspecialchars($product['category'], ENT_QUOTES, 'UTF-8'); ?></td>
                                 <td class="p-3"><?php echo htmlspecialchars($product['store_name'], ENT_QUOTES, 'UTF-8'); ?></td>
                                 <td class="p-3"><?php echo htmlspecialchars($product['stock'], ENT_QUOTES, 'UTF-8'); ?></td>
-                                <td class="p-3"><?php echo htmlspecialchars($currency_symbol, ENT_QUOTES, 'UTF-8') . (is_numeric($product['price']) ? number_format($product['price'], 2) : '0.00'); ?></td>
+                                <td class="p-3"><?php echo htmlspecialchars($currency_symbol, ENT_QUOTES, 'UTF-8') . number_format($product['price'], 2); ?></td>
                                 <td class="p-3">
                                     <span class="px-2 py-1 text-xs font-medium rounded-full <?php 
                                         echo $product['status'] == 'In Stock' ? 'bg-green-100 text-green-700' : 
@@ -778,156 +777,155 @@ require_once __DIR__ . '/includes/header.php';
                                         </button>
                                     </td>
                                 </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="mt-4">
+                    <button type="button" onclick="closeCategoriesModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
+                        <i data-feather="x" class="w-4 h-4 mr-2"></i> Close
+                    </button>
+                </div>
             </div>
-            <div class="mt-4">
-                <button type="button" onclick="closeCategoriesModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
-                    <i data-feather="x" class="w-4 h-4 mr-2"></i> Close
-                </button>
+        </div>
+
+        <!-- Modal for Add/Edit Category -->
+        <div id="category-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-md modal-content">
+                <h2 id="category-modal-title" class="text-lg font-semibold mb-4"></h2>
+                <form id="category-form" method="POST" action="inventory.php" class="space-y-4">
+                    <input type="hidden" name="action" id="category-form-action">
+                    <input type="hidden" name="category_id" id="category-id">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Category Name <span class="text-red-500">*</span></label>
+                        <input type="text" name="name" id="category-name" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary" required>
+                    </div>
+                    <div class="flex space-x-4">
+                        <button type="submit" class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
+                            <i data-feather="save" class="w-4 h-4 mr-2"></i> Save
+                        </button>
+                        <button type="button" onclick="closeCategoryModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
+                            <i data-feather="x" class="w-4 h-4 mr-2"></i> Cancel
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
-    </div>
 
-    <!-- Modal for Add/Edit Category -->
-    <div id="category-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
-        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-md modal-content">
-            <h2 id="category-modal-title" class="text-lg font-semibold mb-4"></h2>
-            <form id="category-form" method="POST" action="inventory.php" class="space-y-4">
-                <input type="hidden" name="action" id="category-form-action">
-                <input type="hidden" name="category_id" id="category-id">
-                <div>
-                    <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Category Name <span class="text-red-500">*</span></label>
-                    <input type="text" name="name" id="category-name" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary" required>
-                </div>
-                <div class="flex space-x-4">
-                    <button type="submit" class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
-                        <i data-feather="save" class="w-4 h-4 mr-2"></i> Save
-                    </button>
-                    <button type="button" onclick="closeCategoryModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
-                        <i data-feather="x" class="w-4 h-4 mr-2"></i> Cancel
-                    </button>
-                </div>
-            </form>
+        <!-- Import Excel Modal -->
+        <div id="import-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-md">
+                <h2 class="text-lg font-semibold mb-4">Import Products from Excel</h2>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                    Upload an Excel file with columns: ID (optional), Product Name, Category, Store Name, Stock, Price, Status (In Stock, Low Stock, or Out of Stock), Barcode.
+                </p>
+                <form id="import-form" method="POST" action="inventory.php" enctype="multipart/form-data" class="space-y-4">
+                    <input type="hidden" name="action" value="import">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Excel File <span class="text-red-500">*</span></label>
+                        <input type="file" name="import_file" accept=".xlsx,.xls" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none" required>
+                    </div>
+                    <div class="flex space-x-4">
+                        <button type="submit" class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
+                            <i data-feather="upload" class="w-4 h-4 mr-2"></i> Import
+                        </button>
+                        <button type="button" onclick="closeImportModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
+                            <i data-feather="x" class="w-4 h-4 mr-2"></i> Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
         </div>
-    </div>
+    </main>
 
-    <!-- Import Excel Modal -->
-    <div id="import-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
-        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-md">
-            <h2 class="text-lg font-semibold mb-4">Import Products from Excel</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                Upload an Excel file with columns: ID (optional), Product Name, Category, Store Name, Stock, Price, Status (In Stock, Low Stock, or Out of Stock), Barcode.
-            </p>
-            <form id="import-form" method="POST" action="inventory.php" enctype="multipart/form-data" class="space-y-4">
-                <input type="hidden" name="action" value="import">
-                <div>
-                    <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Excel File <span class="text-red-500">*</span></label>
-                    <input type="file" name="import_file" accept=".xlsx,.xls" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none" required>
-                </div>
-                <div class="flex space-x-4">
-                    <button type="submit" class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
-                        <i data-feather="upload" class="w-4 h-4 mr-2"></i> Import
-                    </button>
-                    <button type="button" onclick="closeImportModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
-                        <i data-feather="x" class="w-4 h-4 mr-2"></i> Cancel
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-</main>
-
-<script>
-    // Initialize Feather Icons
-    feather.replace();
-
-    // Modal handling for Add/Edit Product
-    function openModal(action, product = {}) {
-        const modal = document.getElementById('product-modal');
-        const title = document.getElementById('modal-title');
-        document.getElementById('form-action').value = action;
-        title.textContent = action === 'add' ? 'Add Product' : 'Edit Product';
-        
-        document.getElementById('product-id').value = product.id || '';
-        document.getElementById('product-name').value = product.name || '';
-        document.getElementById('product-category').value = product.category || '';
-        document.getElementById('product-store-id').value = product.store_id || '';
-        document.getElementById('product-stock').value = product.stock || '';
-        document.getElementById('product-price').value = product.price || '';
-        document.getElementById('product-status').value = product.status || 'In Stock';
-        document.getElementById('product-barcode').value = product.barcode || '';
-        
-        modal.classList.remove('hidden');
+    <script>
+        // Initialize Feather Icons
         feather.replace();
-    }
 
-    function closeModal() {
-        document.getElementById('product-modal').classList.add('hidden');
-        document.getElementById('product-form').reset();
-    }
+        // Modal handling for Add/Edit Product
+        function openModal(action, product = {}) {
+            const modal = document.getElementById('product-modal');
+            const title = document.getElementById('modal-title');
+            document.getElementById('form-action').value = action;
+            title.textContent = action === 'add' ? 'Add Product' : 'Edit Product';
+            
+            document.getElementById('product-id').value = product.id || '';
+            document.getElementById('product-name').value = product.name || '';
+            document.getElementById('product-category').value = product.category || '';
+            document.getElementById('product-store-id').value = product.store_id || '';
+            document.getElementById('product-stock').value = product.stock || '';
+            document.getElementById('product-price').value = product.price || '';
+            document.getElementById('product-status').value = product.status || 'In Stock';
+            document.getElementById('product-barcode').value = product.barcode || '';
+            
+            modal.classList.remove('hidden');
+            feather.replace();
+        }
 
-    // Modal handling for Manage Categories
-    function openCategoriesModal() {
-        document.getElementById('categories-modal').classList.remove('hidden');
-        feather.replace();
-    }
+        function closeModal() {
+            document.getElementById('product-modal').classList.add('hidden');
+            document.getElementById('product-form').reset();
+        }
 
-    function closeCategoriesModal() {
-        document.getElementById('categories-modal').classList.add('hidden');
-    }
+        // Modal handling for Manage Categories
+        function openCategoriesModal() {
+            document.getElementById('categories-modal').classList.remove('hidden');
+            feather.replace();
+        }
 
-    // Modal handling for Add/Edit Category
-    function openCategoryModal(action, category = {}) {
-        const modal = document.getElementById('category-modal');
-        const title = document.getElementById('category-modal-title');
-        document.getElementById('category-form-action').value = action + '_category';
-        title.textContent = action === 'add' ? 'Add Category' : 'Edit Category';
-        
-        document.getElementById('category-id').value = category.id || '';
-        document.getElementById('category-name').value = category.name || '';
-        
-        modal.classList.remove('hidden');
-        feather.replace();
-    }
+        function closeCategoriesModal() {
+            document.getElementById('categories-modal').classList.add('hidden');
+        }
 
-    function closeCategoryModal() {
-        document.getElementById('category-modal').classList.add('hidden');
-        document.getElementById('category-form').reset();
-    }
+        // Modal handling for Add/Edit Category
+        function openCategoryModal(action, category = {}) {
+            const modal = document.getElementById('category-modal');
+            const title = document.getElementById('category-modal-title');
+            document.getElementById('category-form-action').value = action + '_category';
+            title.textContent = action === 'add' ? 'Add Category' : 'Edit Category';
+            
+            document.getElementById('category-id').value = category.id || '';
+            document.getElementById('category-name').value = category.name || '';
+            
+            modal.classList.remove('hidden');
+            feather.replace();
+        }
 
-    // Modal handling for Import
-    function openImportModal() {
-        document.getElementById('import-modal').classList.remove('hidden');
-        feather.replace();
-    }
+        function closeCategoryModal() {
+            document.getElementById('category-modal').classList.add('hidden');
+            document.getElementById('category-form').reset();
+        }
 
-    function closeImportModal() {
-        document.getElementById('import-modal').classList.add('hidden');
-        document.getElementById('import-form').reset();
-    }
+        // Modal handling for Import
+        function openImportModal() {
+            document.getElementById('import-modal').classList.remove('hidden');
+            feather.replace();
+        }
 
-    // Product filtering
-    function filterProducts() {
-        const search = document.getElementById('search-products').value.toLowerCase();
-        const store = document.getElementById('store-filter').value;
-        const status = document.getElementById('status-filter').value;
-        const rows = document.querySelectorAll('#product-table tr');
-        
-        rows.forEach(row => {
-            const name = row.children[1]?.textContent.toLowerCase() || '';
-            const category = row.children[2]?.textContent.toLowerCase() || '';
-            const rowStore = row.getAttribute('data-store') || '';
-            const rowStatus = row.getAttribute('data-status') || '';
-            const matchesSearch = name.includes(search) || category.includes(search);
-            const matchesStore = !store || rowStore === store;
-            const matchesStatus = !status || rowStatus === status;
-            row.style.display = matchesSearch && matchesStore && matchesStatus ? '' : 'none';
-        });
-    }
-</script>
+        function closeImportModal() {
+            document.getElementById('import-modal').classList.add('hidden');
+            document.getElementById('import-form').reset();
+        }
+
+        // Product filtering
+        function filterProducts() {
+            const search = document.getElementById('search-products').value.toLowerCase();
+            const store = document.getElementById('store-filter').value;
+            const status = document.getElementById('status-filter').value;
+            const rows = document.querySelectorAll('#product-table tr');
+            
+            rows.forEach(row => {
+                const name = row.children[1]?.textContent.toLowerCase() || '';
+                const category = row.children[2]?.textContent.toLowerCase() || '';
+                const rowStore = row.getAttribute('data-store') || '';
+                const rowStatus = row.getAttribute('data-status') || '';
+                const matchesSearch = name.includes(search) || category.includes(search);
+                const matchesStore = !store || rowStore === store;
+                const matchesStatus = !status || rowStatus === status;
+                row.style.display = matchesSearch && matchesStore && matchesStatus ? '' : 'none';
+            });
+        }
+    </script>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
 <?php mysqli_close($conn); ?>
