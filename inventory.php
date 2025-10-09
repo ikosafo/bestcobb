@@ -29,6 +29,30 @@ if (!defined('ENCRYPTION_KEY')) {
     die("Encryption key not defined in config.php. Please define: define('ENCRYPTION_KEY', 'Your32CharacterSecretKeyHere...');");
 }
 
+// Create product_categories table if it doesn't exist
+$check_table = "SHOW TABLES LIKE 'product_categories'";
+$table_result = mysqli_query($conn, $check_table);
+if (mysqli_num_rows($table_result) == 0) {
+    $create_query = "CREATE TABLE product_categories (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL UNIQUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )";
+    if (mysqli_query($conn, $create_query)) {
+        // Insert default categories
+        $insert_defaults = "INSERT INTO product_categories (name) VALUES 
+            ('Electronics'), 
+            ('Clothing'), 
+            ('Groceries'), 
+            ('Books'), 
+            ('Home Appliances')";
+        mysqli_query($conn, $insert_defaults);
+        error_log("Created product_categories table and inserted defaults.");
+    } else {
+        error_log("Error creating product_categories table: " . mysqli_error($conn));
+    }
+}
+
 // Initialize user array
 $user = [
     'name' => $_SESSION['username'] ?? 'John Doe',
@@ -109,6 +133,81 @@ function decryptId($encrypted) {
 $success_message = '';
 $error_message = '';
 
+// Handle category deletions
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['delete_category'])) {
+    $encrypted_id = filter_input(INPUT_GET, 'delete_category', FILTER_SANITIZE_SPECIAL_CHARS);
+    if ($encrypted_id) {
+        $delete_id = decryptId($encrypted_id);
+        if ($delete_id !== false) {
+            // Get category name
+            $cat_query = "SELECT name FROM product_categories WHERE id = ?";
+            $cat_stmt = mysqli_prepare($conn, $cat_query);
+            mysqli_stmt_bind_param($cat_stmt, 'i', $delete_id);
+            mysqli_stmt_execute($cat_stmt);
+            $cat_result = mysqli_stmt_get_result($cat_stmt);
+            $cat_row = mysqli_fetch_assoc($cat_result);
+            $cat_name = $cat_row['name'] ?? '';
+            mysqli_stmt_close($cat_stmt);
+
+            if ($cat_name) {
+                // Check if used in products
+                $check_query = "SELECT COUNT(*) as count FROM products WHERE category = ?";
+                $check_stmt = mysqli_prepare($conn, $check_query);
+                mysqli_stmt_bind_param($check_stmt, 's', $cat_name);
+                mysqli_stmt_execute($check_stmt);
+                $result = mysqli_stmt_get_result($check_stmt);
+                $row = mysqli_fetch_assoc($result);
+                mysqli_stmt_close($check_stmt);
+
+                if ($row['count'] > 0) {
+                    $error_message = "Cannot delete category: It is associated with {$row['count']} product(s).";
+                } else {
+                    $query = "DELETE FROM product_categories WHERE id = ?";
+                    $stmt = mysqli_prepare($conn, $query);
+                    mysqli_stmt_bind_param($stmt, 'i', $delete_id);
+                    if (mysqli_stmt_execute($stmt)) {
+                        $success_message = "Category deleted successfully!";
+                    } else {
+                        $error_message = "Error deleting category: " . mysqli_error($conn);
+                    }
+                    mysqli_stmt_close($stmt);
+                }
+            } else {
+                $error_message = "Category not found.";
+            }
+        } else {
+            $error_message = "Invalid delete request.";
+        }
+    }
+}
+
+// Handle category add/edit
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array($_POST['action'], ['add_category', 'edit_category'])) {
+    $category_id = filter_input(INPUT_POST, 'category_id', FILTER_SANITIZE_NUMBER_INT);
+    $name = trim(filter_input(INPUT_POST, 'name', FILTER_SANITIZE_SPECIAL_CHARS) ?: '');
+
+    if ($name) {
+        if ($_POST['action'] === 'add_category') {
+            $query = "INSERT INTO product_categories (name) VALUES (?)";
+            $stmt = mysqli_prepare($conn, $query);
+            mysqli_stmt_bind_param($stmt, 's', $name);
+        } else {
+            $query = "UPDATE product_categories SET name = ? WHERE id = ?";
+            $stmt = mysqli_prepare($conn, $query);
+            mysqli_stmt_bind_param($stmt, 'si', $name, $category_id);
+        }
+        if (mysqli_stmt_execute($stmt)) {
+            $success_message = $_POST['action'] === 'add_category' ? 'Category added successfully!' : 'Category updated successfully!';
+        } else {
+            $error_message = 'Error saving category: ' . mysqli_error($conn);
+        }
+        mysqli_stmt_close($stmt);
+    } else {
+        $error_message = 'Please fill in the category name.';
+    }
+}
+
+// Handle product deletions
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['delete'])) {
     $encrypted_id = filter_input(INPUT_GET, 'delete', FILTER_SANITIZE_SPECIAL_CHARS);
     error_log("Delete attempt with encrypted_id: " . ($encrypted_id ?: 'empty'));
@@ -258,6 +357,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                             continue;
                         }
 
+                        // Check if category exists, add if not
+                        $cat_check_query = "SELECT id FROM product_categories WHERE name = ?";
+                        $cat_check_stmt = mysqli_prepare($conn, $cat_check_query);
+                        mysqli_stmt_bind_param($cat_check_stmt, 's', $category);
+                        mysqli_stmt_execute($cat_check_stmt);
+                        $cat_result = mysqli_stmt_get_result($cat_check_stmt);
+                        if (mysqli_num_rows($cat_result) == 0) {
+                            $insert_cat_query = "INSERT INTO product_categories (name) VALUES (?)";
+                            $insert_cat_stmt = mysqli_prepare($conn, $insert_cat_query);
+                            mysqli_stmt_bind_param($insert_cat_stmt, 's', $category);
+                            if (mysqli_stmt_execute($insert_cat_stmt)) {
+                                error_log("Added new category during import: $category");
+                            } else {
+                                error_log("Error adding category during import: " . mysqli_error($conn));
+                                $error_count++;
+                                continue;
+                            }
+                            mysqli_stmt_close($insert_cat_stmt);
+                        }
+                        mysqli_stmt_close($cat_check_stmt);
+
                         // Validate store_id
                         $store_query = "SELECT id FROM stores WHERE store_name = ? AND status = 'Active'";
                         $stmt = mysqli_prepare($conn, $store_query);
@@ -344,11 +464,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
         if ($_POST['action'] === 'add') {
             $query = "INSERT INTO products (name, category, store_id, stock, price, status, barcode) VALUES (?, ?, ?, ?, ?, ?, ?)";
             $stmt = mysqli_prepare($conn, $query);
-            mysqli_stmt_bind_param($stmt, 'ssiidss', $name, $category, $store_id, $stock, $price, $status, $barcode); // Corrected
+            mysqli_stmt_bind_param($stmt, 'ssiidss', $name, $category, $store_id, $stock, $price, $status, $barcode);
         } else {
             $query = "UPDATE products SET name = ?, category = ?, store_id = ?, stock = ?, price = ?, status = ?, barcode = ? WHERE id = ?";
             $stmt = mysqli_prepare($conn, $query);
-            mysqli_stmt_bind_param($stmt, 'ssisdsdsi', $name, $category, $store_id, $stock, $price, $status, $barcode, $product_id);
+            mysqli_stmt_bind_param($stmt, 'ssiidssi', $name, $category, $store_id, $stock, $price, $status, $barcode, $product_id);
         }
         if (mysqli_stmt_execute($stmt)) {
             $success_message = $_POST['action'] === 'add' ? 'Product added successfully!' : 'Product updated successfully!';
@@ -399,6 +519,11 @@ $stores_query = "SELECT id, store_name FROM stores WHERE status = 'Active' ORDER
 $stores_result = mysqli_query($conn, $stores_query);
 $stores = $stores_result ? mysqli_fetch_all($stores_result, MYSQLI_ASSOC) : [];
 
+// Fetch categories for dropdown and management
+$categories_query = "SELECT id, name FROM product_categories ORDER BY name";
+$categories_result = mysqli_query($conn, $categories_query);
+$categories = $categories_result ? mysqli_fetch_all($categories_result, MYSQLI_ASSOC) : [];
+
 // Fetch metrics
 $total_products = count($products);
 $low_stock_query = "SELECT COUNT(*) as count FROM products WHERE stock < 10";
@@ -448,6 +573,7 @@ require_once __DIR__ . '/includes/header.php';
                 <button onclick="openModal('add')" class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
                     <i data-feather="plus" class="w-4 h-4 mr-2"></i> Add Product
                 </button>
+                
                 <p>
                     <a href="inventory.php?export=true" class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent/90 transition flex items-center">
                         <i data-feather="download" class="w-4 h-4 mr-2"></i> Export Excel
@@ -455,6 +581,10 @@ require_once __DIR__ . '/includes/header.php';
                     <br>
                     <button onclick="openImportModal()" class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent/90 transition flex items-center">
                         <i data-feather="upload" class="w-4 h-4 mr-2"></i> Import Excel
+                    </button>
+                    <br>
+                    <button onclick="openCategoriesModal()" class="bg-accent text-white px-4 py-2 rounded-lg hover:bg-accent/90 transition flex items-center">
+                        <i data-feather="list" class="w-4 h-4 mr-2"></i> Manage Categories
                     </button>
                 </p>
             </div>
@@ -560,7 +690,11 @@ require_once __DIR__ . '/includes/header.php';
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Category <span class="text-red-500">*</span></label>
-                    <input type="text" name="category" id="product-category" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary" required>
+                    <select name="category" id="product-category" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary" required>
+                        <?php foreach ($categories as $category): ?>
+                            <option value="<?php echo htmlspecialchars($category['name'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($category['name'], ENT_QUOTES, 'UTF-8'); ?></option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Store <span class="text-red-500">*</span></label>
@@ -602,6 +736,84 @@ require_once __DIR__ . '/includes/header.php';
         </div>
     </div>
 
+    <!-- Modal for Manage Categories -->
+    <div id="categories-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-lg modal-content overflow-y-auto max-h-96">
+            <h2 class="text-lg font-semibold mb-4">Manage Categories</h2>
+            <button onclick="openCategoryModal('add')" class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition flex items-center mb-4">
+                <i data-feather="plus" class="w-4 h-4 mr-2"></i> Add Category
+            </button>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-gray-200 dark:border-gray-700">
+                            <th class="p-3 text-left font-medium">ID</th>
+                            <th class="p-3 text-left font-medium">Name</th>
+                            <th class="p-3 text-left font-medium">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (empty($categories)): ?>
+                            <tr>
+                                <td colspan="3" class="p-3 text-center text-gray-500">No categories found.</td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($categories as $category): ?>
+                                <?php 
+                                    $cat_id = $category['id'];
+                                    $encrypted_cat_id = encryptId($cat_id);
+                                ?>
+                                <tr class="border-b border-gray-200 dark:border-gray-700">
+                                    <td class="p-3"><?php echo htmlspecialchars($category['id'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td class="p-3"><?php echo htmlspecialchars($category['name'], ENT_QUOTES, 'UTF-8'); ?></td>
+                                    <td class="p-3 flex space-x-2">
+                                        <button onclick='openCategoryModal("edit", <?php echo json_encode($category); ?>)' class="text-primary hover:text-primary/80">
+                                            <i data-feather="edit" class="w-5 h-5"></i>
+                                        </button>
+                                        <button 
+                                            onclick='if (confirm(`Are you sure you want to delete \"<?php echo htmlspecialchars($category['name'], ENT_QUOTES, 'UTF-8'); ?>\"? This action cannot be undone and may fail if the category is used in products.`)) { window.location.href = "inventory.php?delete_category=<?php echo htmlspecialchars($encrypted_cat_id, ENT_QUOTES, 'UTF-8'); ?>"; }' 
+                                            class="text-red-500 hover:text-red-600"
+                                        >
+                                            <i data-feather="trash-2" class="w-5 h-5"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-4">
+                <button type="button" onclick="closeCategoriesModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
+                    <i data-feather="x" class="w-4 h-4 mr-2"></i> Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Add/Edit Category -->
+    <div id="category-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-md modal-content">
+            <h2 id="category-modal-title" class="text-lg font-semibold mb-4"></h2>
+            <form id="category-form" method="POST" action="inventory.php" class="space-y-4">
+                <input type="hidden" name="action" id="category-form-action">
+                <input type="hidden" name="category_id" id="category-id">
+                <div>
+                    <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Category Name <span class="text-red-500">*</span></label>
+                    <input type="text" name="name" id="category-name" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-primary" required>
+                </div>
+                <div class="flex space-x-4">
+                    <button type="submit" class="bg-primary text-white px-6 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
+                        <i data-feather="save" class="w-4 h-4 mr-2"></i> Save
+                    </button>
+                    <button type="button" onclick="closeCategoryModal()" class="bg-neutral text-white px-6 py-2 rounded-lg hover:bg-neutral/90 transition flex items-center">
+                        <i data-feather="x" class="w-4 h-4 mr-2"></i> Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Import Excel Modal -->
     <div id="import-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden modal">
         <div class="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 w-full max-w-md">
@@ -632,7 +844,7 @@ require_once __DIR__ . '/includes/header.php';
     // Initialize Feather Icons
     feather.replace();
 
-    // Modal handling for Add/Edit
+    // Modal handling for Add/Edit Product
     function openModal(action, product = {}) {
         const modal = document.getElementById('product-modal');
         const title = document.getElementById('modal-title');
@@ -649,27 +861,52 @@ require_once __DIR__ . '/includes/header.php';
         document.getElementById('product-barcode').value = product.barcode || '';
         
         modal.classList.remove('hidden');
-        console.log('Opened product modal for action:', action, 'Product:', product);
         feather.replace();
     }
 
     function closeModal() {
         document.getElementById('product-modal').classList.add('hidden');
         document.getElementById('product-form').reset();
-        console.log('Closed product modal');
+    }
+
+    // Modal handling for Manage Categories
+    function openCategoriesModal() {
+        document.getElementById('categories-modal').classList.remove('hidden');
+        feather.replace();
+    }
+
+    function closeCategoriesModal() {
+        document.getElementById('categories-modal').classList.add('hidden');
+    }
+
+    // Modal handling for Add/Edit Category
+    function openCategoryModal(action, category = {}) {
+        const modal = document.getElementById('category-modal');
+        const title = document.getElementById('category-modal-title');
+        document.getElementById('category-form-action').value = action + '_category';
+        title.textContent = action === 'add' ? 'Add Category' : 'Edit Category';
+        
+        document.getElementById('category-id').value = category.id || '';
+        document.getElementById('category-name').value = category.name || '';
+        
+        modal.classList.remove('hidden');
+        feather.replace();
+    }
+
+    function closeCategoryModal() {
+        document.getElementById('category-modal').classList.add('hidden');
+        document.getElementById('category-form').reset();
     }
 
     // Modal handling for Import
     function openImportModal() {
         document.getElementById('import-modal').classList.remove('hidden');
-        console.log('Opened import modal');
         feather.replace();
     }
 
     function closeImportModal() {
         document.getElementById('import-modal').classList.add('hidden');
         document.getElementById('import-form').reset();
-        console.log('Closed import modal');
     }
 
     // Product filtering
