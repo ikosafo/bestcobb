@@ -17,17 +17,45 @@ try {
         throw new Exception('Cart is empty.');
     }
 
-    $customer_name = filter_input(INPUT_POST, 'customer_name', FILTER_SANITIZE_STRING);
-    $payment_method = filter_input(INPUT_POST, 'payment_method', FILTER_SANITIZE_STRING);
-    $date = filter_input(INPUT_POST, 'date', FILTER_SANITIZE_STRING);
+   $customer_name = trim(filter_input(INPUT_POST, 'customer_name') ?? '');
+    $customer_name = $customer_name !== '' ? htmlspecialchars($customer_name, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, 'UTF-8') : 'Guest';
 
-    if (!$customer_name || !$payment_method || !$date || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+    $payment_method = trim(filter_input(INPUT_POST, 'payment_method') ?? '');
+    $payment_method = $payment_method !== '' ? htmlspecialchars($payment_method, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, 'UTF-8') : '';
+
+    // For $date, since you're validating the format separately, you can do similar but skip if it's not needed for HTML escaping
+    $date = trim(filter_input(INPUT_POST, 'date') ?? '');
+    $date = $date !== '' ? htmlspecialchars($date, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, 'UTF-8') : '';
+    $amount_paid = filter_input(INPUT_POST, 'amount_paid', FILTER_VALIDATE_FLOAT);
+    $change_given = filter_input(INPUT_POST, 'change_given', FILTER_VALIDATE_FLOAT);
+
+    $customer_name = trim($customer_name) ?: 'Guest';
+
+    if (!$payment_method || !$date || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         throw new Exception('Invalid input data.');
+    }
+
+    if ($amount_paid === false || $amount_paid < 0 || $change_given === false || $change_given < 0) {
+        throw new Exception('Invalid payment data.');
     }
 
     $store_id = $_SESSION['store_id'] ?? null;
     if (!$store_id) {
         throw new Exception('No store assigned.');
+    }
+
+    // Calculate total from cart
+    $total = 0;
+    foreach ($_SESSION['cart'] as $item) {
+        $total += floatval($item['subtotal']);
+    }
+
+    if ($amount_paid < $total) {
+        throw new Exception('Amount paid is less than total.');
+    }
+
+    if (abs($change_given - ($amount_paid - $total)) > 0.01) { // Allow small float precision error
+        throw new Exception('Change given does not match calculation.');
     }
 
     // Fetch store name
@@ -52,11 +80,11 @@ try {
         }
 
         // Insert transaction without product_name
-        $stmt = mysqli_prepare($conn, "INSERT INTO transactions (store_id, product_id, customer_name, quantity, amount, date, payment_method, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'Completed')");
+        $stmt = mysqli_prepare($conn, "INSERT INTO transactions (store_id, product_id, customer_name, quantity, amount, date, payment_method, status, amount_paid, change_given) VALUES (?, ?, ?, ?, ?, ?, ?, 'Completed', ?, ?)");
         if (!$stmt) {
             throw new Exception('Database query preparation failed: ' . mysqli_error($conn));
         }
-        mysqli_stmt_bind_param($stmt, 'iisidss', $store_id, $item['id'], $customer_name, $item['quantity'], $item['subtotal'], $date, $payment_method);
+        mysqli_stmt_bind_param($stmt, 'iisidssdd', $store_id, $item['id'], $customer_name, $item['quantity'], $item['subtotal'], $date, $payment_method, $amount_paid, $change_given);
         mysqli_stmt_execute($stmt);
         $transaction_id = mysqli_insert_id($conn);
         mysqli_stmt_close($stmt);
@@ -93,7 +121,9 @@ try {
             'amount' => $item['subtotal'],
             'date' => $date,
             'payment_method' => $payment_method,
-            'status' => 'Completed'
+            'status' => 'Completed',
+            'amount_paid' => $amount_paid,
+            'change_given' => $change_given
         ];
         $updated_products[] = ['id' => $item['id'], 'stock' => $updated_stock];
     }

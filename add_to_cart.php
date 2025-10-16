@@ -16,7 +16,8 @@ try {
     $product_id = filter_input(INPUT_POST, 'product_id', FILTER_VALIDATE_INT);
     $quantity = filter_input(INPUT_POST, 'quantity', FILTER_VALIDATE_INT);
     $store_id = filter_input(INPUT_POST, 'store_id', FILTER_VALIDATE_INT);
-    $barcode = filter_input(INPUT_POST, 'barcode', FILTER_SANITIZE_STRING);
+    $barcode = trim(filter_input(INPUT_POST, 'barcode') ?? '');
+    $barcode = $barcode !== '' ? htmlspecialchars($barcode, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401, 'UTF-8') : '';
 
     if ((!$product_id && !$barcode) || !$quantity || !$store_id || $quantity <= 0) {
         throw new Exception('Invalid input data.');

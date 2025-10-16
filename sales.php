@@ -72,7 +72,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
     } elseif ($_POST['action'] === 'delete') {
         $transaction_id = filter_input(INPUT_POST, 'transaction_id', FILTER_VALIDATE_INT);
-        if ($transaction_id) {
+        // New: Reserve delete for Admins only
+        if ($_SESSION['role'] !== 'Admin') {  // Adjust 'Admin' if your role name differs
+            $error_message = 'Only Admins can delete transactions.';
+        } elseif ($transaction_id) {
             $query = "DELETE FROM transactions WHERE id = ?";
             $stmt = mysqli_prepare($conn, $query);
             mysqli_stmt_bind_param($stmt, 'i', $transaction_id);
@@ -245,6 +248,8 @@ require_once __DIR__ . '/includes/header.php';
                     <th class="p-3 text-left font-medium">Customer</th>
                     <th class="p-3 text-left font-medium">Quantity</th>
                     <th class="p-3 text-left font-medium">Amount</th>
+                    <th class="p-3 text-left font-medium">Amount Paid</th>
+                    <th class="p-3 text-left font-medium">Change Given</th>
                     <th class="p-3 text-left font-medium">Date</th>
                     <th class="p-3 text-left font-medium">Payment</th>
                     <th class="p-3 text-left font-medium">Status</th>
@@ -299,8 +304,8 @@ require_once __DIR__ . '/includes/header.php';
         <div id="checkout-form">
             <div id="checkout-message" class="hidden mb-4"></div>
             <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Customer Name <span class="text-red-500">*</span></label>
-                <input type="text" id="customer-name" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none" required>
+                <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Customer Name</label>
+                <input type="text" id="customer-name" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none">
             </div>
             <div class="mb-4">
                 <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Payment Method <span class="text-red-500">*</span></label>
@@ -316,7 +321,16 @@ require_once __DIR__ . '/includes/header.php';
             </div>
             <div class="mb-4">
                 <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Total</label>
-                <input type="text" id="checkout-total" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400" value="<?php echo htmlspecialchars($settings['currency_symbol']) . number_format($cart_total, 2); ?>" readonly>
+                <input type="hidden" id="checkout-total-value" value="<?php echo $cart_total; ?>">
+                <input type="text" id="checkout-total-display" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400" value="<?php echo htmlspecialchars($settings['currency_symbol']) . number_format($cart_total, 2); ?>" readonly>
+            </div>
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Amount Paid <span class="text-red-500">*</span></label>
+                <input type="number" id="amount-paid" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus:outline-none" min="0" step="0.01" required>
+            </div>
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-500 dark:text-gray-400">Change Given</label>
+                <input type="text" id="change-given" class="mt-1 w-full p-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400" readonly>
             </div>
             <div class="flex justify-end space-x-2">
                 <button onclick="closeCheckoutModal()" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition">Cancel</button>
@@ -353,6 +367,9 @@ const taxRates = <?php
 
 // Load settings
 const settings = <?php echo json_encode($settings); ?>;
+
+// New: Echo user role for JS
+const userRole = '<?php echo $_SESSION['role'] ?? ''; ?>';
 
 // Product search
 let products = <?php echo json_encode($products); ?>;
@@ -479,7 +496,13 @@ function updateCartTable(cart, total) {
 
     const displayTotal = isNaN(Number(total)) ? calculatedTotal : Number(total);
     cartTotal.textContent = displayTotal.toFixed(2);
-    document.getElementById('checkout-total').value = `${currencySymbol}${displayTotal.toFixed(2)}`;
+
+    document.getElementById('checkout-total-value').value = displayTotal;
+
+    const modalDisplay = document.getElementById('checkout-total-display');
+    if (modalDisplay) {
+        modalDisplay.value = currencySymbol + displayTotal.toFixed(2);
+    }
 
     if (cart.length > 0) {
         if (!checkoutButton) {
@@ -535,6 +558,9 @@ document.getElementById('barcode').addEventListener('change', async function() {
 
 // Checkout modal
 function openCheckoutModal() {
+    const numericTotal = parseFloat(document.getElementById('checkout-total-value').value) || 0;
+    document.getElementById('checkout-total-display').value = currencySymbol + numericTotal.toFixed(2);
+    document.getElementById('change-given').value = currencySymbol + '0.00';
     document.getElementById('checkout-modal').classList.remove('hidden');
 }
 
@@ -545,25 +571,34 @@ function closeCheckoutModal() {
     checkoutMessage.classList.add('hidden');
 }
 
+// Calculate change
+document.getElementById('amount-paid').addEventListener('input', function() {
+    const paid = parseFloat(this.value) || 0;
+    const total = parseFloat(document.getElementById('checkout-total-value').value) || 0;
+    const change = (paid >= total) ? (paid - total) : 0;
+    document.getElementById('change-given').value = currencySymbol + change.toFixed(2);
+});
+
 // Process checkout
 async function processCheckout() {
     const customerName = document.getElementById('customer-name').value;
     const paymentMethod = document.getElementById('payment-method').value;
     const date = document.getElementById('checkout-date').value;
+    const amountPaid = parseFloat(document.getElementById('amount-paid').value) || 0;
+    const changeGivenStr = document.getElementById('change-given').value.replace(currencySymbol, '');
+    const changeGiven = parseFloat(changeGivenStr) || 0;
+    const total = parseFloat(document.getElementById('checkout-total-value').value) || 0;
 
     // Debugging: Log input values
     console.log('Checkout Inputs:', {
         customerName,
-        customerNameTrimmed: customerName.trim(),
         paymentMethod,
-        date
+        date,
+        amountPaid,
+        changeGiven
     });
 
     // Validate inputs
-    if (!customerName.trim()) {
-        showMessage('Customer name is required and cannot be empty.', false);
-        return;
-    }
     if (!paymentMethod) {
         showMessage('Please select a payment method.', false);
         return;
@@ -574,6 +609,10 @@ async function processCheckout() {
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         showMessage('Date must be in YYYY-MM-DD format.', false);
+        return;
+    }
+    if (amountPaid < total) {
+        showMessage('Amount paid must be at least the total.', false);
         return;
     }
 
@@ -607,21 +646,25 @@ async function processCheckout() {
         }
 
         // Validate cart totals
-        let total = 0;
+        let cartTotal = 0;
         for (const item of cart) {
             const subtotal = Number(item.subtotal) || 0;
             if (isNaN(subtotal)) {
                 showMessage('Invalid cart data. Please clear cart and try again.', false);
                 return;
             }
-            total += subtotal;
+            cartTotal += subtotal;
+        }
+
+        if (Math.abs(cartTotal - total) > 0.01) {
+            throw new Error('Cart total mismatch.');
         }
 
         // Proceed with checkout
         const checkoutResponse = await fetch('checkout.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `action=checkout&customer_name=${encodeURIComponent(customerName.trim())}&payment_method=${encodeURIComponent(paymentMethod)}&date=${encodeURIComponent(date)}`
+            body: `action=checkout&customer_name=${encodeURIComponent(customerName.trim())}&payment_method=${encodeURIComponent(paymentMethod)}&date=${encodeURIComponent(date)}&amount_paid=${encodeURIComponent(amountPaid)}&change_given=${encodeURIComponent(changeGiven)}`
         });
 
         if (!checkoutResponse.ok) {
@@ -709,6 +752,8 @@ function printReceipt(sale) {
                 <p><strong>${tax.name} (${tax.rate}%):</strong> ${settings.currency_symbol}${tax.amount.toFixed(2)}</p>
             `).join('')}
             <p><strong>Total:</strong> ${settings.currency_symbol}${totalAmount.toFixed(2)}</p>
+            <p><strong>Amount Paid:</strong> ${settings.currency_symbol}${Number(sale.amount_paid || 0).toFixed(2)}</p>
+            <p><strong>Change Given:</strong> ${settings.currency_symbol}${Number(sale.change_given || 0).toFixed(2)}</p>
             <hr style="margin: 10px 0;">
             <p>${settings.receipt_footer}</p>
         </div>
@@ -779,6 +824,8 @@ function printReceiptAfterCheckout(transactions) {
             <p><strong>Subtotal:</strong> ${settings.currency_symbol}${(totalAmount - totalTax).toFixed(2)}</p>
             ${taxSummaryHTML}
             <p><strong>Total:</strong> ${settings.currency_symbol}${totalAmount.toFixed(2)}</p>
+            <p><strong>Amount Paid:</strong> ${settings.currency_symbol}${Number(transactions[0].amount_paid).toFixed(2)}</p>
+            <p><strong>Change Given:</strong> ${settings.currency_symbol}${Number(transactions[0].change_given).toFixed(2)}</p>
             <hr style="margin: 10px 0;">
             <p>${settings.receipt_footer}</p>
         </div>
@@ -786,33 +833,32 @@ function printReceiptAfterCheckout(transactions) {
     
     receiptBody.innerHTML = receiptHTML;
 
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
-        <html>
-            <head>
-                <title>Receipt</title>
-                <style>
-                    @page { margin: 0; }
-                    body { 
-                        font-family: 'Poppins', sans-serif; 
-                        margin: 10mm; 
-                        width: ${settings.receipt_width}mm; 
-                        text-align: ${settings.payment_summary_alignment};
-                    }
-                    h2 { font-size: 1.5rem; }
-                    p { margin: 5px 0; }
-                    hr { margin: 10px 0; }
-                    table { width: 100%; border-collapse: collapse; }
-                    th, td { padding: 5px; text-align: left; }
-                    th { font-weight: bold; }
-                </style>
-            </head>
-            <body>${receiptHTML}</body>
-        </html>
-    `);
-    printWindow.document.close();
-
     if (settings.auto_print == 1) {
+        const printWindow = window.open('', '_blank');
+        printWindow.document.write(`
+            <html>
+                <head>
+                    <title>Receipt</title>
+                    <style>
+                        @page { margin: 0; }
+                        body { 
+                            font-family: 'Poppins', sans-serif; 
+                            margin: 10mm; 
+                            width: ${settings.receipt_width}mm; 
+                            text-align: ${settings.payment_summary_alignment};
+                        }
+                        h2 { font-size: 1.5rem; }
+                        p { margin: 5px 0; }
+                        hr { margin: 10px 0; }
+                        table { width: 100%; border-collapse: collapse; }
+                        th, td { padding: 5px; text-align: left; }
+                        th { font-weight: bold; }
+                    </style>
+                </head>
+                <body>${receiptHTML}</body>
+            </html>
+        `);
+        printWindow.document.close();
         printWindow.print();
         printWindow.close();
     } else {
@@ -857,12 +903,14 @@ async function fetchSales(page) {
     const rowsPerPage = document.getElementById('rows-per-page').value;
     const statusFilter = document.getElementById('status-filter').value;
     const storeId = '<?php echo isset($_SESSION['store_id']) ? $_SESSION['store_id'] : ''; ?>';
+    // New: Default to today's filter
+    const filterDate = 'today'; // Can add UI to toggle to 'all'
 
     const salesTable = document.getElementById('sales-table');
-    salesTable.innerHTML = '<tr><td colspan="10" class="p-3 text-center">Loading...</td></tr>';
+    salesTable.innerHTML = '<tr><td colspan="12" class="p-3 text-center">Loading...</td></tr>';
 
     try {
-        const response = await fetch(`fetch_sales.php?page=${page}&rows_per_page=${rowsPerPage}${statusFilter ? `&status=${statusFilter}` : ''}${storeId ? `&store_id=${storeId}` : ''}`);
+        const response = await fetch(`fetch_sales.php?page=${page}&rows_per_page=${rowsPerPage}${statusFilter ? `&status=${statusFilter}` : ''}${storeId ? `&store_id=${storeId}` : ''}&filter_date=${filterDate}`);
         if (!response.ok) {
             throw new Error(`HTTP error! Status: ${response.status}`);
         }
@@ -872,6 +920,11 @@ async function fetchSales(page) {
             currentPage = data.current_page;
             salesTable.innerHTML = '';
             data.sales.forEach(sale => {
+                // New: Relative time (e.g., "4 minutes ago")
+                const relativeTime = formatRelativeTime(sale.date);
+                // Use formatted_date for tooltip or details
+                const absoluteTime = sale.formatted_date;
+
                 const row = `
                     <tr class="border-b border-gray-200 dark:border-gray-700">
                         <td class="p-3">${sale.id}</td>
@@ -880,7 +933,9 @@ async function fetchSales(page) {
                         <td class="p-3">${sale.customer_name}</td>
                         <td class="p-3">${sale.quantity}</td>
                         <td class="p-3">${currencySymbol}${Number(sale.amount).toFixed(2)}</td>
-                        <td class="p-3">${sale.date}</td>
+                        <td class="p-3">${currencySymbol}${Number(sale.amount_paid || 0).toFixed(2)}</td>
+                        <td class="p-3">${currencySymbol}${Number(sale.change_given || 0).toFixed(2)}</td>
+                        <td class="p-3" title="${absoluteTime}">${relativeTime}</td>
                         <td class="p-3">${sale.payment_method || 'N/A'}</td>
                         <td class="p-3">
                             <span class="px-2 py-1 text-xs font-medium rounded-full ${sale.status == 'Completed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}">
@@ -891,9 +946,9 @@ async function fetchSales(page) {
                             <button onclick='printReceipt(${JSON.stringify(sale)})' class="text-accent hover:text-accent/80">
                                 <i data-feather="printer" class="w-5 h-5"></i>
                             </button>
-                            <button onclick='confirmDelete(${sale.id}, "${sale.customer_name}")' class="text-red-500 hover:text-red-600">
+                            ${userRole === 'Admin' ? `<button onclick='confirmDelete(${sale.id}, "${sale.customer_name}")' class="text-red-500 hover:text-red-600">
                                 <i data-feather="trash-2" class="w-5 h-5"></i>
-                            </button>
+                            </button>` : ''}
                         </td>
                     </tr>`;
                 salesTable.innerHTML += row;
@@ -909,6 +964,37 @@ async function fetchSales(page) {
         showMessage('Error fetching sales: ' + error.message, false);
     }
 }
+
+// New: Relative time formatter
+function formatRelativeTime(dateStr) {
+    const now = new Date();
+    const past = new Date(dateStr);
+    const diffMs = now - past;
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+    const diffWeek = Math.floor(diffDay / 7);
+
+    if (diffSec < 60) {
+        return diffSec <= 0 ? 'Just now' : `${diffSec} seconds ago`;
+    } else if (diffMin < 60) {
+        return `${diffMin} minute${diffMin > 1 ? 's' : ''} ago`;
+    } else if (diffHour < 24) {
+        const hours = diffHour;
+        const minutes = diffMin % 60;
+        return `${hours} hour${hours > 1 ? 's' : ''}${minutes > 0 ? ` ${minutes} minute${minutes > 1 ? 's' : ''}` : ''} ago`;
+    } else if (diffDay < 7) {
+        return `${diffDay} day${diffDay > 1 ? 's' : ''} ago`;
+    } else {
+        return `${diffWeek} week${diffWeek > 1 ? 's' : ''} ago`;
+    }
+}
+
+// New: Auto-update relative times every minute
+setInterval(() => {
+    fetchSales(currentPage); // Refresh whole table every minute for freshness (lightweight)
+}, 60000);
 
 function updatePagination(totalPages, currentPage) {
     const pageNumbers = document.getElementById('page-numbers');
