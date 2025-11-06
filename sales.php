@@ -589,15 +589,6 @@ async function processCheckout() {
     const changeGiven = parseFloat(changeGivenStr) || 0;
     const total = parseFloat(document.getElementById('checkout-total-value').value) || 0;
 
-    // Debugging: Log input values
-    console.log('Checkout Inputs:', {
-        customerName,
-        paymentMethod,
-        date,
-        amountPaid,
-        changeGiven
-    });
-
     // Validate inputs
     if (!paymentMethod) {
         showMessage('Please select a payment method.', false);
@@ -638,8 +629,6 @@ async function processCheckout() {
         }
 
         const cart = cartData.cart;
-        console.log('Fetched Cart:', cart); // Debugging
-
         if (!cart.length) {
             showMessage('Cart is empty. Add items before checking out.', false);
             return;
@@ -709,220 +698,258 @@ function calculateTaxes(price, quantity) {
     return { totalTax, taxDetails };
 }
 
-// Receipt handling
+// REUSABLE PRINT FUNCTION
+function printReceiptInNewWindow(content) {
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Receipt</title>
+            <meta charset="UTF-8">
+            <style>
+                @page {
+                    size: ${settings.receipt_width}mm auto;
+                    margin: 5mm;
+                }
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }
+                body {
+                    font-family: 'Courier New', monospace !important;
+                    font-size: 12px;
+                    line-height: 1.4;
+                    color: #000;
+                    padding: 5mm;
+                    width: ${settings.receipt_width}mm;
+                    margin: 0 auto;
+                }
+                .receipt-print {
+                    width: 100%;
+                }
+                h2 {
+                    font-size: 16px;
+                    text-align: center;
+                    margin: 0 0 5px 0;
+                }
+                p {
+                    margin: 5px 0;
+                    font-size: 11px;
+                }
+                hr {
+                    border: 0;
+                    border-top: 1px dashed #000;
+                    margin: 10px 0;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 11px;
+                    margin: 8px 0;
+                }
+                th, td {
+                    padding: 3px 0;
+                    text-align: left;
+                }
+                th:nth-child(2), td:nth-child(2) { text-align: center; }
+                th:nth-child(3), td:nth-child(3),
+                th:nth-child(4), td:nth-child(4) { text-align: right; }
+                tbody tr { border-bottom: 1px dashed #ccc; }
+                .text-right { text-align: right; }
+                .text-center { text-align: center; }
+                strong { font-weight: bold; }
+                @media print {
+                    body { -webkit-print-color-adjust: exact; }
+                }
+            </style>
+        </head>
+        <body onload="window.print(); window.close();">
+            ${content}
+        </body>
+        </html>
+    `);
+    printWindow.document.close();
+}
+
+// Print single receipt
 function printReceipt(sale) {
-    const receiptBody = document.getElementById('receipt-body');
     const { totalTax, taxDetails } = calculateTaxes(sale.amount / sale.quantity, sale.quantity);
     const subtotal = Number(sale.amount) - totalTax;
-    const totalAmount = Number(sale.amount);
 
     const receiptHTML = `
-        <div style="text-align: ${settings.payment_summary_alignment}; width: ${settings.receipt_width}mm; font-family: 'Poppins', sans-serif;">
-            <h2>${settings.receipt_header}</h2>
-            <p><strong>${settings.store_name}</strong></p>
-            <p>${settings.address}</p>
-            <p>${settings.contact}</p>
-            <hr style="margin: 10px 0;">
+        <div class="receipt-print">
+            <div style="text-align: center;">
+                <h2>${settings.receipt_header}</h2>
+                <p><strong>${settings.store_name}</strong></p>
+                <p>${settings.address}</p>
+                <p>${settings.contact}</p>
+            </div>
+            <hr>
             <p><strong>Transaction ID:</strong> ${sale.id}</p>
-            <p><strong>Customer:</strong> ${sale.customer_name}</p>
+            <p><strong>Customer:</strong> ${sale.customer_name || 'Walk-in'}</p>
             <p><strong>Date:</strong> ${sale.date}</p>
-            <p><strong>Payment Method:</strong> ${sale.payment_method || 'N/A'}</p>
-            <hr style="margin: 10px 0;">
-            <table style="width: 100%; text-align: left;">
+            <p><strong>Payment:</strong> ${sale.payment_method || 'N/A'}</p>
+            <hr>
+            <table>
                 <thead>
-                    <tr>
+                    <tr style="border-bottom: 1px dashed #000;">
                         <th>Item</th>
-                        <th>Qty</th>
-                        <th>Price</th>
-                        <th>Subtotal</th>
+                        <th style="text-align: center;">Qty</th>
+                        <th style="text-align: right;">Price</th>
+                        <th style="text-align: right;">Total</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
                         <td>${sale.product_name}</td>
-                        <td>${sale.quantity}</td>
-                        <td>${settings.currency_symbol}${Number(sale.amount / sale.quantity).toFixed(2)}</td>
-                        <td>${settings.currency_symbol}${subtotal.toFixed(2)}</td>
+                        <td style="text-align: center;">${sale.quantity}</td>
+                        <td style="text-align: right;">${currencySymbol}${(sale.amount / sale.quantity).toFixed(2)}</td>
+                        <td style="text-align: right;">${currencySymbol}${subtotal.toFixed(2)}</td>
                     </tr>
                 </tbody>
             </table>
-            <hr style="margin: 10px 0;">
-            <p><strong>Subtotal:</strong> ${settings.currency_symbol}${subtotal.toFixed(2)}</p>
-            ${taxDetails.map(tax => `
-                <p><strong>${tax.name} (${tax.rate}%):</strong> ${settings.currency_symbol}${tax.amount.toFixed(2)}</p>
-            `).join('')}
-            <p><strong>Total:</strong> ${settings.currency_symbol}${totalAmount.toFixed(2)}</p>
-            <p><strong>Amount Paid:</strong> ${settings.currency_symbol}${Number(sale.amount_paid || 0).toFixed(2)}</p>
-            <p><strong>Change Given:</strong> ${settings.currency_symbol}${Number(sale.change_given || 0).toFixed(2)}</p>
-            <hr style="margin: 10px 0;">
-            <p>${settings.receipt_footer}</p>
+            <hr>
+            <p style="text-align: right;"><strong>Subtotal:</strong> ${currencySymbol}${subtotal.toFixed(2)}</p>
+            ${taxDetails.map(t => `<p style="text-align: right;"><strong>${t.name} (${t.rate}%):</strong> ${currencySymbol}${t.amount.toFixed(2)}</p>`).join('')}
+            <p style="text-align: right; font-size: 13px;"><strong>TOTAL:</strong> ${currencySymbol}${Number(sale.amount).toFixed(2)}</p>
+            <p style="text-align: right;"><strong>Paid:</strong> ${currencySymbol}${Number(sale.amount_paid || 0).toFixed(2)}</p>
+            <p style="text-align: right;"><strong>Change:</strong> ${currencySymbol}${Number(sale.change_given || 0).toFixed(2)}</p>
+            <hr>
+            <p style="text-align: center; font-size: 11px;">${settings.receipt_footer}</p>
         </div>
     `;
-    
-    receiptBody.innerHTML = receiptHTML;
-    openReceiptModal();
+
+    printReceiptInNewWindow(receiptHTML);
 }
 
+// Print after checkout
 function printReceiptAfterCheckout(transactions) {
     const receiptBody = document.getElementById('receipt-body');
     let totalAmount = 0;
     let totalTax = 0;
     const taxDetailsMap = {};
 
-    const itemsHTML = transactions.map((sale, index) => {
+    const itemsHTML = transactions.map(sale => {
         const { totalTax: itemTax, taxDetails } = calculateTaxes(sale.amount / sale.quantity, sale.quantity);
         const subtotal = Number(sale.amount) - itemTax;
         totalAmount += Number(sale.amount);
         totalTax += itemTax;
 
         taxDetails.forEach(tax => {
-            if (!taxDetailsMap[tax.name]) {
-                taxDetailsMap[tax.name] = { rate: tax.rate, amount: 0 };
-            }
+            if (!taxDetailsMap[tax.name]) taxDetailsMap[tax.name] = { rate: tax.rate, amount: 0 };
             taxDetailsMap[tax.name].amount += tax.amount;
         });
 
         return `
             <tr>
                 <td>${sale.product_name}</td>
-                <td>${sale.quantity}</td>
-                <td>${settings.currency_symbol}${Number(sale.amount / sale.quantity).toFixed(2)}</td>
-                <td>${settings.currency_symbol}${subtotal.toFixed(2)}</td>
-            </tr>
-        `;
+                <td style="text-align: center;">${sale.quantity}</td>
+                <td style="text-align: right;">${currencySymbol}${(sale.amount / sale.quantity).toFixed(2)}</td>
+                <td style="text-align: right;">${currencySymbol}${subtotal.toFixed(2)}</td>
+            </tr>`;
     }).join('');
 
-    const taxSummaryHTML = Object.keys(taxDetailsMap).map(name => `
-        <p><strong>${name} (${taxDetailsMap[name].rate}%):</strong> ${settings.currency_symbol}${taxDetailsMap[name].amount.toFixed(2)}</p>
-    `).join('');
+    const taxSummaryHTML = Object.keys(taxDetailsMap).map(name => 
+        `<p style="text-align: right;"><strong>${name} (${taxDetailsMap[name].rate}%):</strong> ${currencySymbol}${taxDetailsMap[name].amount.toFixed(2)}</p>`
+    ).join('');
 
     const receiptHTML = `
-        <div style="text-align: ${settings.payment_summary_alignment}; width: ${settings.receipt_width}mm; font-family: 'Poppins', sans-serif;">
-            <h2>${settings.receipt_header}</h2>
-            <p><strong>${settings.store_name}</strong></p>
-            <p>${settings.address}</p>
-            <p>${settings.contact}</p>
-            <hr style="margin: 10px 0;">
-            <p><strong>Customer:</strong> ${transactions[0].customer_name}</p>
+        <div class="receipt-print">
+            <div style="text-align: center;">
+                <h2>${settings.receipt_header}</h2>
+                <p><strong>${settings.store_name}</strong></p>
+                <p>${settings.address}</p>
+                <p>${settings.contact}</p>
+            </div>
+            <hr>
+            <p><strong>Customer:</strong> ${transactions[0].customer_name || 'Walk-in'}</p>
             <p><strong>Date:</strong> ${transactions[0].date}</p>
-            <p><strong>Payment Method:</strong> ${transactions[0].payment_method}</p>
-            <hr style="margin: 10px 0;">
-            <table style="width: 100%; text-align: left;">
+            <p><strong>Payment:</strong> ${transactions[0].payment_method}</p>
+            <hr>
+            <table>
                 <thead>
-                    <tr>
+                    <tr style="border-bottom: 1px dashed #000;">
                         <th>Item</th>
-                        <th>Qty</th>
-                        <th>Price</th>
-                        <th>Subtotal</th>
+                        <th style="text-align: center;">Qty</th>
+                        <th style="text-align: right;">Price</th>
+                        <th style="text-align: right;">Total</th>
                     </tr>
                 </thead>
-                <tbody>
-                    ${itemsHTML}
-                </tbody>
+                <tbody>${itemsHTML}</tbody>
             </table>
-            <hr style="margin: 10px 0;">
-            <p><strong>Subtotal:</strong> ${settings.currency_symbol}${(totalAmount - totalTax).toFixed(2)}</p>
+            <hr>
+            <p style="text-align: right;"><strong>Subtotal:</strong> ${currencySymbol}${(totalAmount - totalTax).toFixed(2)}</p>
             ${taxSummaryHTML}
-            <p><strong>Total:</strong> ${settings.currency_symbol}${totalAmount.toFixed(2)}</p>
-            <p><strong>Amount Paid:</strong> ${settings.currency_symbol}${Number(transactions[0].amount_paid).toFixed(2)}</p>
-            <p><strong>Change Given:</strong> ${settings.currency_symbol}${Number(transactions[0].change_given).toFixed(2)}</p>
-            <hr style="margin: 10px 0;">
-            <p>${settings.receipt_footer}</p>
+            <p style="text-align: right; font-size: 13px;"><strong>TOTAL:</strong> ${currencySymbol}${totalAmount.toFixed(2)}</p>
+            <p style="text-align: right;"><strong>Paid:</strong> ${currencySymbol}${Number(transactions[0].amount_paid).toFixed(2)}</p>
+            <p style="text-align: right;"><strong>Change:</strong> ${currencySymbol}${Number(transactions[0].change_given).toFixed(2)}</p>
+            <hr>
+            <p style="text-align: center; font-size: 11px;">${settings.receipt_footer}</p>
         </div>
     `;
-    
+
     receiptBody.innerHTML = receiptHTML;
 
     if (settings.auto_print == 1) {
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(`
-            <html>
-                <head>
-                    <title>Receipt</title>
-                    <style>
-                        @page { margin: 0; }
-                        body { 
-                            font-family: 'Poppins', sans-serif; 
-                            margin: 10mm; 
-                            width: ${settings.receipt_width}mm; 
-                            text-align: ${settings.payment_summary_alignment};
-                        }
-                        h2 { font-size: 1.5rem; }
-                        p { margin: 5px 0; }
-                        hr { margin: 10px 0; }
-                        table { width: 100%; border-collapse: collapse; }
-                        th, td { padding: 5px; text-align: left; }
-                        th { font-weight: bold; }
-                    </style>
-                </head>
-                <body>${receiptHTML}</body>
-            </html>
-        `);
-        printWindow.document.close();
-        printWindow.print();
-        printWindow.close();
+        printReceiptInNewWindow(receiptHTML);
     } else {
         openReceiptModal();
     }
 }
 
+// Print from modal
 function printReceiptContent() {
-    const receiptContent = document.getElementById('receipt-content').innerHTML;
+    const content = document.getElementById('receipt-content').innerHTML;
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`
+        <!DOCTYPE html>
         <html>
-            <head>
-                <title>Receipt</title>
-                <style>
-                    @page { margin: 0; }
-                    body { 
-                        font-family: 'Poppins', sans-serif; 
-                        margin: 10mm; 
-                        width: ${settings.receipt_width}mm; 
-                        text-align: ${settings.payment_summary_alignment};
-                    }
-                    h2 { font-size: 1.5rem; }
-                    p { margin: 5px 0; }
-                    hr { margin: 10px 0; }
-                    table { width: 100%; border-collapse: collapse; }
-                    th, td { padding: 5px; text-align: left; }
-                    th { font-weight: bold; }
-                </style>
-            </head>
-            <body>${receiptContent}</body>
+        <head>
+            <title>Receipt</title>
+            <style>
+                @page { size: ${settings.receipt_width}mm auto; margin: 5mm; }
+                * { margin:0; padding:0; box-sizing:border-box; }
+                body { font-family:'Courier New',monospace; font-size:12px; line-height:1.4; padding:5mm; width:${settings.receipt_width}mm; margin:0 auto; }
+                h2 { font-size:16px; text-align:center; margin:0 0 5px; }
+                p { margin:5px 0; font-size:11px; }
+                hr { border:0; border-top:1px dashed #000; margin:10px 0; }
+                table { width:100%; border-collapse:collapse; font-size:11px; margin:8px 0; }
+                th,td { padding:3px 0; text-align:left; }
+                th:nth-child(2),td:nth-child(2) { text-align:center; }
+                th:nth-child(3),td:nth-child(3), th:nth-child(4),td:nth-child(4) { text-align:right; }
+                strong { font-weight:bold; }
+            </style>
+        </head>
+        <body onload="window.print(); window.close();">${content}</body>
         </html>
     `);
     printWindow.document.close();
-    printWindow.print();
-    printWindow.close();
 }
 
+// Fetch sales
 // Fetch sales
 let currentPage = 1;
 async function fetchSales(page) {
     const rowsPerPage = document.getElementById('rows-per-page').value;
     const statusFilter = document.getElementById('status-filter').value;
-    const storeId = '<?php echo isset($_SESSION['store_id']) ? $_SESSION['store_id'] : ''; ?>';
-    // New: Default to today's filter
-    const filterDate = 'today'; // Can add UI to toggle to 'all'
+    const storeId = '<?php echo isset($_SESSION['store_id']) ? $_SESSION['store_id'] : ""; ?>';
+    const filterDate = 'today';
 
     const salesTable = document.getElementById('sales-table');
     salesTable.innerHTML = '<tr><td colspan="12" class="p-3 text-center">Loading...</td></tr>';
 
     try {
         const response = await fetch(`fetch_sales.php?page=${page}&rows_per_page=${rowsPerPage}${statusFilter ? `&status=${statusFilter}` : ''}${storeId ? `&store_id=${storeId}` : ''}&filter_date=${filterDate}`);
-        if (!response.ok) {
-            throw new Error(`HTTP error! Status: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
         const data = await response.json();
 
         if (data.success) {
             currentPage = data.current_page;
             salesTable.innerHTML = '';
             data.sales.forEach(sale => {
-                // New: Relative time (e.g., "4 minutes ago")
                 const relativeTime = formatRelativeTime(sale.date);
-                // Use formatted_date for tooltip or details
                 const absoluteTime = sale.formatted_date;
 
                 const row = `
@@ -965,7 +992,7 @@ async function fetchSales(page) {
     }
 }
 
-// New: Relative time formatter
+// Relative time
 function formatRelativeTime(dateStr) {
     const now = new Date();
     const past = new Date(dateStr);
@@ -976,25 +1003,19 @@ function formatRelativeTime(dateStr) {
     const diffDay = Math.floor(diffHour / 24);
     const diffWeek = Math.floor(diffDay / 7);
 
-    if (diffSec < 60) {
-        return diffSec <= 0 ? 'Just now' : `${diffSec} seconds ago`;
-    } else if (diffMin < 60) {
-        return `${diffMin} minute${diffMin > 1 ? 's' : ''} ago`;
-    } else if (diffHour < 24) {
+    if (diffSec < 60) return diffSec <= 0 ? 'Just now' : `${diffSec} seconds ago`;
+    if (diffMin < 60) return `${diffMin} minute${diffMin > 1 ? 's' : ''} ago`;
+    if (diffHour < 24) {
         const hours = diffHour;
         const minutes = diffMin % 60;
         return `${hours} hour${hours > 1 ? 's' : ''}${minutes > 0 ? ` ${minutes} minute${minutes > 1 ? 's' : ''}` : ''} ago`;
-    } else if (diffDay < 7) {
-        return `${diffDay} day${diffDay > 1 ? 's' : ''} ago`;
-    } else {
-        return `${diffWeek} week${diffWeek > 1 ? 's' : ''} ago`;
     }
+    if (diffDay < 7) return `${diffDay} day${diffDay > 1 ? 's' : ''} ago`;
+    return `${diffWeek} week${diffWeek > 1 ? 's' : ''} ago`;
 }
 
-// New: Auto-update relative times every minute
-setInterval(() => {
-    fetchSales(currentPage); // Refresh whole table every minute for freshness (lightweight)
-}, 60000);
+// Auto-refresh relative times
+setInterval(() => fetchSales(currentPage), 60000);
 
 function updatePagination(totalPages, currentPage) {
     const pageNumbers = document.getElementById('page-numbers');
