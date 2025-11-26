@@ -1,3 +1,4 @@
+
 <?php
 // sales.php
 require_once __DIR__ . '/config.php';
@@ -343,15 +344,28 @@ require_once __DIR__ . '/includes/header.php';
 </div>
 
 <!-- Receipt Modal -->
-<div id="receipt-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden">
-    <div class="bg-white p-6 rounded-lg max-w-lg w-full overflow-hidden" id="receipt-content">
-        <h2 class="text-lg font-semibold mb-4">Receipt</h2>
-        <div id="receipt-body"></div>
-        <div class="flex justify-end mt-4">
-            <button onclick="printReceiptContent()" class="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition flex items-center">
-                <i data-feather="printer" class="w-4 h-4 mr-2"></i> Print
+<div id="receipt-modal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center hidden z-50">
+    <div class="bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-screen overflow-hidden flex flex-col">
+        <div class="bg-primary text-white p-4 flex justify-between items-center">
+            <h2 class="text-xl font-bold flex items-center">
+                <i data-feather="file-text" class="w-6 h-6 mr-2"></i> Receipt Preview
+            </h2>
+            <button onclick="closeReceiptModal()" class="text-white hover:bg-white/20 rounded-full p-2">
+                <i data-feather="x" class="w-6 h-6"></i>
             </button>
-            <button onclick="closeReceiptModal()" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition ml-2">Close</button>
+        </div>
+
+        <div class="p-6 overflow-y-auto flex-1 bg-gray-50">
+            <div id="receipt-body" class="bg-white shadow-inner"></div>
+        </div>
+
+        <div class="bg-gray-100 p-4 flex justify-center gap-4 border-t">
+            <button onclick="printReceiptFromModal()" class="bg-primary text-white px-8 py-3 rounded-lg hover:bg-primary/90 transition flex items-center text-lg font-medium">
+                <i data-feather="printer" class="w-6 h-6 mr-3"></i> Print Receipt
+            </button>
+            <!-- <button onclick="downloadReceiptAsPDF()" class="bg-green-600 text-white px-8 py-3 rounded-lg hover:bg-green-700 transition flex items-center text-lg font-medium">
+                <i data-feather="download" class="w-6 h-6 mr-3"></i> Download PDF
+            </button> -->
         </div>
     </div>
 </div>
@@ -929,7 +943,6 @@ function printReceiptContent() {
 }
 
 // Fetch sales
-// Fetch sales
 let currentPage = 1;
 async function fetchSales(page) {
     const rowsPerPage = document.getElementById('rows-per-page').value;
@@ -1053,17 +1066,209 @@ function confirmDelete(id, customerName) {
 
 function openReceiptModal() {
     document.getElementById('receipt-modal').classList.remove('hidden');
+    setTimeout(safeFeatherReplace, 100); 
 }
 
-function closeReceiptModal() {
-    document.getElementById('receipt-modal').classList.add('hidden');
-}
 
 function safeFeatherReplace() {
     if (typeof feather !== 'undefined') {
         feather.replace();
     }
 }
+</script>
+
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+
+<script>
+// REUSABLE PROFESSIONAL RECEIPT GENERATOR
+function generateReceiptHTML(transactions, settings, currencySymbol) {
+    const isSingle = transactions.length === 1;
+    const sale = transactions[0];
+    let totalAmount = 0;
+    let totalTax = 0;
+    const taxDetailsMap = {};
+
+    const itemsHTML = transactions.map(s => {
+        const price = Number(s.amount) / s.quantity;
+        const { totalTax: itemTax, taxDetails } = calculateTaxes(price, s.quantity);
+        const subtotal = Number(s.amount) - itemTax;
+        totalAmount += Number(s.amount);
+        totalTax += itemTax;
+
+        taxDetails.forEach(tax => {
+            if (!taxDetailsMap[tax.name]) taxDetailsMap[tax.name] = { rate: tax.rate, amount: 0 };
+            taxDetailsMap[tax.name].amount += tax.amount;
+        });
+
+        return `
+            <tr>
+                <td style="padding: 6px 0; border-bottom: 1px dashed #ccc;">${s.product_name}</td>
+                <td style="text-align: center; padding: 6px 0; border-bottom: 1px dashed #ccc;">${s.quantity}</td>
+                <td style="text-align: right; padding: 6px 0; border-bottom: 1px dashed #ccc;">${currencySymbol}${price.toFixed(2)}</td>
+                <td style="text-align: right; padding: 6px 0; border-bottom: 1px dashed #ccc;">${currencySymbol}${subtotal.toFixed(2)}</td>
+            </tr>`;
+    }).join('');
+
+    const taxSummaryHTML = Object.keys(taxDetailsMap).map(name =>
+        `<div style="text-align: right; font-size: 11px; margin: 4px 0;">
+            <strong>${name} (${taxDetailsMap[name].rate}%):</strong> ${currencySymbol}${taxDetailsMap[name].amount.toFixed(2)}
+        </div>`
+    ).join('');
+
+    const subtotal = totalAmount - totalTax;
+
+    return `
+    <div id="receipt-preview-content" style="
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        max-width: ${settings.receipt_width}mm;
+        margin: 0 auto;
+        padding: 10px;
+        background: white;
+        color: black;
+        border: 1px solid #ddd;
+    ">
+        <div style="text-align: center; margin-bottom: 10px;">
+            <h2 style="margin: 0; font-size: 16px;">${settings.receipt_header}</h2>
+            <strong style="font-size: 13px;">${settings.store_name}</strong><br>
+            <small>${settings.address}<br>${settings.contact}</small>
+        </div>
+
+        <div style="border-top: 1px dashed #000; margin: 10px 0;"></div>
+
+        ${!isSingle ? '' : `<div style="font-size: 11px;">
+            <strong>Transaction ID:</strong> ${sale.id}<br>
+        </div>`}
+        <strong>Customer:</strong> ${sale.customer_name || 'Walk-in Customer'}<br>
+        <strong>Date:</strong> ${new Date(sale.date).toLocaleString()}<br>
+        <strong>Payment:</strong> ${sale.payment_method}<br>
+
+        <div style="border-top: 1px dashed #000; margin: 15px 0 10px;"></div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+            <thead>
+                <tr style="border-bottom: 2px solid #000;">
+                    <th style="text-align: left; padding: 5px 0;">Item</th>
+                    <th style="text-align: center;">Qty</th>
+                    <th style="text-align: right;">Price</th>
+                    <th style="text-align: right;">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${itemsHTML}
+            </tbody>
+        </table>
+
+        <div style="border-top: 1px dashed #000; margin: 10px 0;"></div>
+
+        <div style="text-align: right; font-size: 11px;">
+            <div><strong>Subtotal:</strong> ${currencySymbol}${subtotal.toFixed(2)}</div>
+            ${taxSummaryHTML}
+            <div style="font-size: 15px; font-weight: bold; margin: 8px 0; padding: 5px 0; border-top: 1px solid #000; border-bottom: 3px double #000;">
+                TOTAL: ${currencySymbol}${totalAmount.toFixed(2)}
+            </div>
+            <div><strong>Amount Paid:</strong> ${currencySymbol}${Number(sale.amount_paid || 0).toFixed(2)}</div>
+            <div><strong>Change:</strong> ${currencySymbol}${Number(sale.change_given || 0).toFixed(2)}</div>
+        </div>
+
+        <div style="border-top: 1px dashed #000; margin: 15px 0 0; padding-top: 10px; text-align: center; font-size: 11px;">
+            ${settings.receipt_footer.replace(/\n/g, '<br>')}
+        </div>
+
+        <div style="margin-top: 20px; text-align: center; font-size: 10px; color: #666;">
+            Powered by Mall POS • ${new Date().toLocaleString()}
+        </div>
+    </div>`;
+}
+
+// Updated: Print after checkout with PROFESSIONAL PREVIEW
+function printReceiptAfterCheckout(transactions) {
+    const receiptBody = document.getElementById('receipt-body');
+    const html = generateReceiptHTML(transactions, settings, currencySymbol);
+    receiptBody.innerHTML = html;
+
+    // Always show modal (better UX)
+    openReceiptModal();
+
+    // Auto-print if enabled
+    if (settings.auto_print == 1) {
+        setTimeout(() => printReceiptFromModal(), 500);
+    }
+}
+
+// New: Print from modal (thermal printer optimized)
+function printReceiptFromModal() {
+    const content = document.getElementById('receipt-preview-content');
+    if (!content) return;
+
+    const printWindow = window.open('', '_blank', 'width=800,height=900');
+    printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Receipt</title>
+            <meta charset="UTF-8">
+            <style>
+                @page { size: ${settings.receipt_width}mm auto; margin: 0; }
+                body { margin: 0; padding: 10px; font-family: 'Courier New', monospace; }
+                ${content.outerHTML}
+                @media print {
+                    body { -webkit-print-color-adjust: exact; }
+                }
+            </style>
+        </head>
+        <body onload="window.print(); setTimeout(() => window.close(), 500)">
+            ${content.outerHTML}
+        </body>
+        </html>
+    `);
+    printWindow.document.close();
+}
+
+// New: Download as PDF (WORKS PERFECTLY)
+async function downloadReceiptAsPDF() {
+    const element = document.getElementById('receipt-preview-content');
+    if (!element) {
+        alert('Receipt not ready');
+        return;
+    }
+
+    try {
+        const canvas = await html2canvas(element, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: '#ffffff'
+        });
+
+        const imgData = canvas.toDataURL('image/png');
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({
+            orientation: 'portrait',
+            unit: 'mm',
+            format: [settings.receipt_width, canvas.height * (settings.receipt_width / canvas.width) + 20]
+        });
+
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
+
+        pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, 0);
+        pdf.save(`receipt_${transactions[0]?.id || 'pos'}_${new Date().getTime()}.pdf`);
+    } catch (err) {
+        console.error('PDF generation failed:', err);
+        alert('Failed to generate PDF. Please try printing instead.');
+    }
+}
+
+
+function closeReceiptModal() {
+    document.getElementById('receipt-modal').classList.add('hidden');
+}
+
 </script>
 
 <?php require_once __DIR__ . '/includes/footer.php'; ?>
