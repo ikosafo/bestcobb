@@ -787,131 +787,6 @@ function printReceiptInNewWindow(content) {
     printWindow.document.close();
 }
 
-// Print single receipt
-function printReceipt(sale) {
-    const { totalTax, taxDetails } = calculateTaxes(sale.amount / sale.quantity, sale.quantity);
-    const subtotal = Number(sale.amount) - totalTax;
-
-    const receiptHTML = `
-        <div class="receipt-print">
-            <div style="text-align: center;">
-                <h2>${settings.receipt_header}</h2>
-                <p><strong>${settings.store_name}</strong></p>
-                <p>${settings.address}</p>
-                <p>${settings.contact}</p>
-            </div>
-            <hr>
-            <p><strong>Transaction ID:</strong> ${sale.id}</p>
-            <p><strong>Customer:</strong> ${sale.customer_name || 'Walk-in'}</p>
-            <p><strong>Date:</strong> ${sale.date}</p>
-            <p><strong>Payment:</strong> ${sale.payment_method || 'N/A'}</p>
-            <hr>
-            <table>
-                <thead>
-                    <tr style="border-bottom: 1px dashed #000;">
-                        <th>Item</th>
-                        <th style="text-align: center;">Qty</th>
-                        <th style="text-align: right;">Price</th>
-                        <th style="text-align: right;">Total</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>${sale.product_name}</td>
-                        <td style="text-align: center;">${sale.quantity}</td>
-                        <td style="text-align: right;">${currencySymbol}${(sale.amount / sale.quantity).toFixed(2)}</td>
-                        <td style="text-align: right;">${currencySymbol}${subtotal.toFixed(2)}</td>
-                    </tr>
-                </tbody>
-            </table>
-            <hr>
-            <p style="text-align: right;"><strong>Subtotal:</strong> ${currencySymbol}${subtotal.toFixed(2)}</p>
-            ${taxDetails.map(t => `<p style="text-align: right;"><strong>${t.name} (${t.rate}%):</strong> ${currencySymbol}${t.amount.toFixed(2)}</p>`).join('')}
-            <p style="text-align: right; font-size: 13px;"><strong>TOTAL:</strong> ${currencySymbol}${Number(sale.amount).toFixed(2)}</p>
-            <p style="text-align: right;"><strong>Paid:</strong> ${currencySymbol}${Number(sale.amount_paid || 0).toFixed(2)}</p>
-            <p style="text-align: right;"><strong>Change:</strong> ${currencySymbol}${Number(sale.change_given || 0).toFixed(2)}</p>
-            <hr>
-            <p style="text-align: center; font-size: 11px;">${settings.receipt_footer}</p>
-        </div>
-    `;
-
-    printReceiptInNewWindow(receiptHTML);
-}
-
-// Print after checkout
-function printReceiptAfterCheckout(transactions) {
-    const receiptBody = document.getElementById('receipt-body');
-    let totalAmount = 0;
-    let totalTax = 0;
-    const taxDetailsMap = {};
-
-    const itemsHTML = transactions.map(sale => {
-        const { totalTax: itemTax, taxDetails } = calculateTaxes(sale.amount / sale.quantity, sale.quantity);
-        const subtotal = Number(sale.amount) - itemTax;
-        totalAmount += Number(sale.amount);
-        totalTax += itemTax;
-
-        taxDetails.forEach(tax => {
-            if (!taxDetailsMap[tax.name]) taxDetailsMap[tax.name] = { rate: tax.rate, amount: 0 };
-            taxDetailsMap[tax.name].amount += tax.amount;
-        });
-
-        return `
-            <tr>
-                <td>${sale.product_name}</td>
-                <td style="text-align: center;">${sale.quantity}</td>
-                <td style="text-align: right;">${currencySymbol}${(sale.amount / sale.quantity).toFixed(2)}</td>
-                <td style="text-align: right;">${currencySymbol}${subtotal.toFixed(2)}</td>
-            </tr>`;
-    }).join('');
-
-    const taxSummaryHTML = Object.keys(taxDetailsMap).map(name => 
-        `<p style="text-align: right;"><strong>${name} (${taxDetailsMap[name].rate}%):</strong> ${currencySymbol}${taxDetailsMap[name].amount.toFixed(2)}</p>`
-    ).join('');
-
-    const receiptHTML = `
-        <div class="receipt-print">
-            <div style="text-align: center;">
-                <h2>${settings.receipt_header}</h2>
-                <p><strong>${settings.store_name}</strong></p>
-                <p>${settings.address}</p>
-                <p>${settings.contact}</p>
-            </div>
-            <hr>
-            <p><strong>Customer:</strong> ${transactions[0].customer_name || 'Walk-in'}</p>
-            <p><strong>Date:</strong> ${transactions[0].date}</p>
-            <p><strong>Payment:</strong> ${transactions[0].payment_method}</p>
-            <hr>
-            <table>
-                <thead>
-                    <tr style="border-bottom: 1px dashed #000;">
-                        <th>Item</th>
-                        <th style="text-align: center;">Qty</th>
-                        <th style="text-align: right;">Price</th>
-                        <th style="text-align: right;">Total</th>
-                    </tr>
-                </thead>
-                <tbody>${itemsHTML}</tbody>
-            </table>
-            <hr>
-            <p style="text-align: right;"><strong>Subtotal:</strong> ${currencySymbol}${(totalAmount - totalTax).toFixed(2)}</p>
-            ${taxSummaryHTML}
-            <p style="text-align: right; font-size: 13px;"><strong>TOTAL:</strong> ${currencySymbol}${totalAmount.toFixed(2)}</p>
-            <p style="text-align: right;"><strong>Paid:</strong> ${currencySymbol}${Number(transactions[0].amount_paid).toFixed(2)}</p>
-            <p style="text-align: right;"><strong>Change:</strong> ${currencySymbol}${Number(transactions[0].change_given).toFixed(2)}</p>
-            <hr>
-            <p style="text-align: center; font-size: 11px;">${settings.receipt_footer}</p>
-        </div>
-    `;
-
-    receiptBody.innerHTML = receiptHTML;
-
-    if (settings.auto_print == 1) {
-        printReceiptInNewWindow(receiptHTML);
-    } else {
-        openReceiptModal();
-    }
-}
 
 // Print from modal
 function printReceiptContent() {
@@ -943,65 +818,103 @@ function printReceiptContent() {
 }
 
 // Fetch sales
+// === FETCH SALES + PRINT FROM HISTORY (FINAL WORKING VERSION) ===
 let currentPage = 1;
-async function fetchSales(page) {
+let currentReceiptTransactions = [];
+
+async function fetchSales(page = 1) {
     const rowsPerPage = document.getElementById('rows-per-page').value;
     const statusFilter = document.getElementById('status-filter').value;
-    const storeId = '<?php echo isset($_SESSION['store_id']) ? $_SESSION['store_id'] : ""; ?>';
-    const filterDate = 'today';
+    const storeId = '<?php echo $_SESSION['store_id'] ?? ""; ?>';
 
     const salesTable = document.getElementById('sales-table');
     salesTable.innerHTML = '<tr><td colspan="12" class="p-3 text-center">Loading...</td></tr>';
 
     try {
-        const response = await fetch(`fetch_sales.php?page=${page}&rows_per_page=${rowsPerPage}${statusFilter ? `&status=${statusFilter}` : ''}${storeId ? `&store_id=${storeId}` : ''}&filter_date=${filterDate}`);
-        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+        const response = await fetch(`fetch_sales.php?page=${page}&rows_per_page=${rowsPerPage}&status=${statusFilter}&store_id=${storeId}&group_by_transaction=1`);
         const data = await response.json();
 
-        if (data.success) {
-            currentPage = data.current_page;
-            salesTable.innerHTML = '';
-            data.sales.forEach(sale => {
-                const relativeTime = formatRelativeTime(sale.date);
-                const absoluteTime = sale.formatted_date;
-
-                const row = `
-                    <tr class="border-b border-gray-200 dark:border-gray-700">
-                        <td class="p-3">${sale.id}</td>
-                        <td class="p-3">${sale.store_name}</td>
-                        <td class="p-3">${sale.product_name}</td>
-                        <td class="p-3">${sale.customer_name}</td>
-                        <td class="p-3">${sale.quantity}</td>
-                        <td class="p-3">${currencySymbol}${Number(sale.amount).toFixed(2)}</td>
-                        <td class="p-3">${currencySymbol}${Number(sale.amount_paid || 0).toFixed(2)}</td>
-                        <td class="p-3">${currencySymbol}${Number(sale.change_given || 0).toFixed(2)}</td>
-                        <td class="p-3" title="${absoluteTime}">${relativeTime}</td>
-                        <td class="p-3">${sale.payment_method || 'N/A'}</td>
-                        <td class="p-3">
-                            <span class="px-2 py-1 text-xs font-medium rounded-full ${sale.status == 'Completed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}">
-                                ${sale.status}
-                            </span>
-                        </td>
-                        <td class="p-3 flex space-x-2">
-                            <button onclick='printReceipt(${JSON.stringify(sale)})' class="text-accent hover:text-accent/80">
-                                <i data-feather="printer" class="w-5 h-5"></i>
-                            </button>
-                            ${userRole === 'Admin' ? `<button onclick='confirmDelete(${sale.id}, "${sale.customer_name}")' class="text-red-500 hover:text-red-600">
-                                <i data-feather="trash-2" class="w-5 h-5"></i>
-                            </button>` : ''}
-                        </td>
-                    </tr>`;
-                salesTable.innerHTML += row;
-            });
-
-            updatePagination(data.total_pages, data.current_page);
-            safeFeatherReplace();
-        } else {
-            showMessage(data.message || 'Failed to fetch sales.', false);
+        if (!data.success) {
+            salesTable.innerHTML = '<tr><td colspan="12" class="p-3 text-center text-red-500">Failed to load sales</td></tr>';
+            return;
         }
-    } catch (error) {
-        console.error('Fetch sales error:', error);
-        showMessage('Error fetching sales: ' + error.message, false);
+
+        currentPage = data.current_page;
+        salesTable.innerHTML = '';
+
+        data.sales.forEach(transaction => {
+            const itemsCount = transaction.items ? transaction.items.length : 1;
+            const totalQty = transaction.items ? transaction.items.reduce((sum, i) => sum + parseInt(i.quantity), 0) : transaction.quantity;
+
+            const row = `
+                <tr class="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <td class="p-3 font-medium">#${transaction.id}</td>
+                    <td class="p-3">${transaction.store_name || '—'}</td>
+                    <td class="p-3">
+                        ${itemsCount > 1 
+                            ? `<strong>${itemsCount} items</strong><br><small class="text-gray-500">${transaction.items.map(i => i.product_name).join(', ')}</small>`
+                            : transaction.items?.[0]?.product_name || '—'
+                        }
+                    </td>
+                    <td class="p-3">${transaction.customer_name || 'Walk-in'}</td>
+                    <td class="p-3 text-center">${totalQty}</td>
+                    <td class="p-3 font-semibold">${currencySymbol}${Number(transaction.total_amount).toFixed(2)}</td>
+                    <td class="p-3">${currencySymbol}${Number(transaction.amount_paid || 0).toFixed(2)}</td>
+                    <td class="p-3">${currencySymbol}${Number(transaction.change_given || 0).toFixed(2)}</td>
+                    <td class="p-3 text-xs" title="${new Date(transaction.date).toLocaleString()}">
+                        ${formatRelativeTime(transaction.date)}
+                    </td>
+                    <td class="p-3">${transaction.payment_method || 'Cash'}</td>
+                    <td class="p-3">
+                        <span class="px-2 py-1 text-xs font-medium rounded-full ${transaction.status === 'Completed' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}">
+                            ${transaction.status}
+                        </span>
+                    </td>
+                    <td class="p-3 flex space-x-2">
+                        <button onclick="printTransaction(${transaction.id})" 
+                                class="text-accent hover:text-accent/80 transition">
+                            <i data-feather="printer" class="w-5 h-5"></i>
+                        </button>
+                        ${userRole === 'Admin' ? `
+                        <button onclick="confirmDelete(${transaction.id}, '${transaction.customer_name || 'Walk-in'}')" 
+                                class="text-red-500 hover:text-red-600 transition">
+                            <i data-feather="trash-2" class="w-5 h-5"></i>
+                        </button>` : ''}
+                    </td>
+                </tr>`;
+            salesTable.innerHTML += row;
+        });
+
+        updatePagination(data.total_pages, data.current_page);
+        safeFeatherReplace();
+    } catch (err) {
+        console.error(err);
+        salesTable.innerHTML = '<tr><td colspan="12" class="p-3 text-center text-red-500">Network error</td></tr>';
+    }
+}
+
+// Print full transaction (from history)
+async function printTransaction(transactionId) {
+    try {
+        const res = await fetch(`get_transaction.php?id=${transactionId}`);
+        const data = await res.json();
+
+        if (!data.success || !data.transaction) {
+            alert('Could not load receipt');
+            return;
+        }
+
+        currentReceiptTransactions = data.transaction.items || [data.transaction];
+        const html = generateReceiptHTML(currentReceiptTransactions, settings, currencySymbol);
+        document.getElementById('receipt-body').innerHTML = html;
+        openReceiptModal();
+
+        if (settings.auto_print == 1) {
+            setTimeout(printReceiptFromModal, 500);
+        }
+    } catch (err) {
+        console.error(err);
+        alert('Print failed');
     }
 }
 
@@ -1176,30 +1089,29 @@ function generateReceiptHTML(transactions, settings, currencySymbol) {
             <div><strong>Change:</strong> ${currencySymbol}${Number(sale.change_given || 0).toFixed(2)}</div>
         </div>
 
-        <div style="border-top: 1px dashed #000; margin: 15px 0 0; padding-top: 10px; text-align: center; font-size: 11px;">
+        <div style="font-weight:bold;border-top: 1px dashed #000; margin: 15px 0 0; padding-top: 10px; text-align: center; font-size: 11px;">
             ${settings.receipt_footer.replace(/\n/g, '<br>')}
         </div>
 
-        <div style="margin-top: 20px; text-align: center; font-size: 10px; color: #666;">
-            Powered by Mall POS • ${new Date().toLocaleString()}
+        <div style="font-weight:bold;margin-top: 20px; text-align: center; font-size: 10px; color: #666;">
+            Powered by Bestcobb Supermarket POS • ${new Date().toLocaleString()}
         </div>
     </div>`;
 }
 
-// Updated: Print after checkout with PROFESSIONAL PREVIEW
 function printReceiptAfterCheckout(transactions) {
+    currentReceiptTransactions = transactions;  // Save it
     const receiptBody = document.getElementById('receipt-body');
     const html = generateReceiptHTML(transactions, settings, currencySymbol);
     receiptBody.innerHTML = html;
 
-    // Always show modal (better UX)
     openReceiptModal();
 
-    // Auto-print if enabled
     if (settings.auto_print == 1) {
         setTimeout(() => printReceiptFromModal(), 500);
     }
 }
+
 
 // New: Print from modal (thermal printer optimized)
 function printReceiptFromModal() {
@@ -1233,7 +1145,7 @@ function printReceiptFromModal() {
 // New: Download as PDF (WORKS PERFECTLY)
 async function downloadReceiptAsPDF() {
     const element = document.getElementById('receipt-preview-content');
-    if (!element) {
+    if (!element || currentReceiptTransactions.length === 0) {
         alert('Receipt not ready');
         return;
     }
@@ -1254,16 +1166,32 @@ async function downloadReceiptAsPDF() {
         });
 
         const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = pdf.internal.pageSize.getHeight();
-
         pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, 0);
-        pdf.save(`receipt_${transactions[0]?.id || 'pos'}_${new Date().getTime()}.pdf`);
+        pdf.save(`receipt_${currentReceiptTransactions[0]?.id || 'pos'}_${new Date().getTime()}.pdf`);
     } catch (err) {
         console.error('PDF generation failed:', err);
         alert('Failed to generate PDF. Please try printing instead.');
     }
 }
 
+
+function printReceipt(transactions) {
+    // Ensure transactions is an array
+    if (!Array.isArray(transactions)) {
+        transactions = [transactions];
+    }
+
+    const receiptBody = document.getElementById('receipt-body');
+    const html = generateReceiptHTML(transactions, settings, currencySymbol);
+    receiptBody.innerHTML = html;
+
+    openReceiptModal();
+
+    // Auto-print if enabled
+    if (settings.auto_print == 1) {
+        setTimeout(printReceiptFromModal, 500);
+    }
+}
 
 function closeReceiptModal() {
     document.getElementById('receipt-modal').classList.add('hidden');
